@@ -1,54 +1,36 @@
-use std::{
-    fs,
-    io::{BufReader, Read, Write},
-    path::PathBuf,
-};
+use std::{fs, io::Read, path::PathBuf};
 
 use blake3::Hash;
 
-use crate::codex::{Codex, utils};
+use crate::codex::{Codex, CodexLayout, utils};
 
 impl Codex {
-    pub fn add_file<R>(
+    fn add_file<R>(
         &self,
-        data: R,
+        mut data: R,
         byte: usize,
         filename: &str,
     ) -> anyhow::Result<FileAddedResponse>
     where
         R: Read,
     {
-        // WARN: Incomplete Implementation (works for now)
-        let temp_folder = utils::create_temp_if_not_exists(&self.root_folder)?;
-        let temp_filename = temp_folder.join(filename);
-        let (file_hash, file_id) = match utils::write_to_file(&temp_filename, data, byte) {
-            Ok(result) => result,
-            Err(result) => {
-                fs::remove_file(&temp_filename)?;
-                return Err(result);
-            }
-        };
-
-        let final_filename = self.data_folder.join(&file_id);
-        fs::rename(&temp_filename, &final_filename)?;
-        Ok(FileAddedResponse {
-            file_path: final_filename,
-            file_id,
-            file_hash,
-        })
+        self.layout().add_file(self, &mut data, byte, filename)
     }
-    pub fn search_files(&self, query: &str) -> Vec<PathBuf> {
+    fn validate(&self) -> bool {
+        self.layout().validate(&self)
+    }
+    fn search_files(&self, query: &str) -> Vec<PathBuf> {
         unimplemented!()
     }
-    pub fn read_file(&self, file_name: &str) -> String {
+    fn read_file(&self, file_name: &str) -> String {
         unimplemented!()
     }
 }
 
 pub struct FileAddedResponse {
-    file_path: PathBuf,
-    file_id: String,
-    file_hash: Hash,
+    pub file_path: PathBuf,
+    pub file_id: String,
+    pub file_hash: Hash,
 }
 
 #[cfg(test)]
@@ -57,11 +39,26 @@ mod testing {
 
     use super::*;
     #[test]
+    // Checking whether it works on my local machine, for evidence and satisfaction
     fn writing_file_ok() {
-        let codex = Codex::open("/home/clyde/Documents/first-knowledge").unwrap();
+        let codex =
+            Codex::open(Path::new("/home/clyde/Documents/first-knowledge").to_path_buf()).unwrap();
         let raw_filename = Path::new("/home/clyde/Downloads/sml_importance .pdf");
         let filename = raw_filename.file_name().unwrap().to_str().unwrap();
-        let file_to_w = File::open(&raw_filename).unwrap();
+        let mut file_to_w = File::open(&raw_filename).unwrap();
+        let buffersize: usize = 512;
+
+        let written = codex.add_file(file_to_w, buffersize, filename);
+
+        assert!(written.is_ok())
+    }
+
+    fn writing_file_ok_2() {
+        let codex =
+            Codex::open(Path::new("/home/clyde/Documents/first-knowledge").to_path_buf()).unwrap();
+        let raw_filename = Path::new("/home/clyde/Downloads/sml_importance .pdf");
+        let filename = raw_filename.file_name().unwrap().to_str().unwrap();
+        let mut file_to_w = File::open(&raw_filename).unwrap();
         let buffersize: usize = 512;
 
         let written = codex.add_file(file_to_w, buffersize, filename);
