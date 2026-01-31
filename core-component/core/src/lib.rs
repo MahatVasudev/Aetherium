@@ -1,4 +1,5 @@
-mod cacher;
-mod codex;
-mod metadata;
-mod tfidf;
+pub mod cacher;
+pub mod codex;
+pub mod metadata;
+pub mod storage;
+pub mod tfidf;

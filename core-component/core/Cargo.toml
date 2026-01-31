@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-tempfile = "3"
 anyhow = "1.0"
 blake3 = "1.0"
 chrono = "0.4"
@@ -12,3 +11,7 @@ chrono-tz = "0.5"
 uuid = { version = "1.6", features = ["v4", "fast-rng"] }
 toml = "0.5.8"
 serde = { version = "1.0.136", features = ["derive"] }
+rusqlite = { version = "0.38.0", features = ["bundled"] }
+
+[dev-dependencies]
+tempfile = "3"
