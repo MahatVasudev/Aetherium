@@ -6,7 +6,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::codex::{DATA_FOLDER, DATABASE_FOLDER, INDEXED_FOLDER, versions::CodexVersion};
+use crate::{
+    codex::versions::CodexVersion,
+    storage::{
+        DATA_FOLDER, DATABASE_FOLDER, INDEXED_FOLDER,
+        versions::{StorageVersion, v1::StorageV1},
+    },
+};
 
 pub fn version_error(version: &str) -> anyhow::Result<CodexVersion> {
     match CodexVersion::parse(version) {
@@ -32,42 +38,4 @@ pub fn make_all_codex_dirs(root_folder: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(root_folder.join(INDEXED_FOLDER))?;
     fs::create_dir_all(root_folder.join(DATABASE_FOLDER))?;
     Ok(())
-}
-
-/// write_to_file
-/// returns anyhow::Result<tuple(blake3::Hash,String)>
-/// writes file in the foldername given (filename) returns the finalized hash and hash as hex
-pub fn write_to_file<R>(filename: &PathBuf, data: R, byte: usize) -> anyhow::Result<(Hash, String)>
-where
-    R: Read,
-{
-    let mut reader = BufReader::new(data);
-    let mut buffer = vec![0; byte];
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .create(true)
-        .open(filename)?;
-    let mut hasher = blake3::Hasher::new();
-    let result = || -> anyhow::Result<()> {
-        loop {
-            let left = reader.read(&mut buffer)?;
-            if left == 0 {
-                break;
-            }
-            hasher.update(&buffer[..left]);
-            file.write_all(&buffer[..left])?;
-        }
-
-        file.flush()?;
-        file.sync_all()?;
-
-        Ok(())
-    }();
-
-    result?;
-
-    let file_hash = hasher.finalize();
-    let file_id = file_hash.to_hex().to_string();
-    Ok((file_hash, file_id))
 }

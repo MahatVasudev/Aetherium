@@ -1,89 +1,67 @@
-mod codex_config;
+pub mod codex_config;
 pub mod file_reading;
 pub mod utils;
 pub mod versions;
 
-use std::{
-    collections::HashSet,
-    fs,
-    io::Read,
-    path::{Path, PathBuf},
-};
+use anyhow::anyhow;
 
-use anyhow::Context;
-use uuid::Uuid;
+use crate::storage::{self, Storage, versions::StorageVersion};
+use std::path::{Path, PathBuf};
 
-use crate::codex::{
-    file_reading::FileAddedResponse,
-    versions::{CodexLayout, CodexVersion, layout_for, v1::CodexV1},
-};
-
-fn is_valid_version(v: &str) -> bool {
-    matches!(v, "v1.0.0")
-}
-
-const LATEST_VERSION: &str = "v1.0.0";
-const CODEX_FILE: &str = "codex.toml";
-const DATA_FOLDER: &str = "data";
-const INDEXED_FOLDER: &str = "indexed";
-const DATABASE_FOLDER: &str = "database";
+use crate::codex::versions::{CodexLayout, CodexVersion, layout_for, v1::CodexV1};
 
 pub struct Codex {
     pub id: String,
     pub name: String,
-    pub version: CodexVersion,
-    pub root_folder: PathBuf,
-    pub data_folder: PathBuf,
-    pub indexed_folder: PathBuf,
-    pub database_folder: PathBuf,
-    pub config_file: PathBuf,
+    layout: Box<dyn CodexLayout>,
+    pub storage: Storage,
 }
 
-impl Codex {}
-
 impl Codex {
-    fn build(root_folder: &Path) -> anyhow::Result<Codex> {
+    fn build(
+        root_folder: &PathBuf,
+        codex_version: CodexVersion,
+        storage_version: StorageVersion,
+    ) -> anyhow::Result<Codex> {
         // WARN: Incomplete Implementation (works for now)
-        let version = CodexVersion::V1;
-        layout_for(version).build(root_folder)
+        layout_for(codex_version).build(root_folder, storage_version)
     }
-    fn new(root_folder: PathBuf, name: String, id: String, version: CodexVersion) -> Codex {
+    fn new(name: String, id: String, version: CodexVersion, storage: Storage) -> Codex {
         Codex {
-            data_folder: root_folder.join(DATA_FOLDER),
-            indexed_folder: root_folder.join(INDEXED_FOLDER),
-            database_folder: root_folder.join(DATABASE_FOLDER),
-            config_file: root_folder.join(CODEX_FILE),
-            version: version,
-            name: name,
-            root_folder: root_folder,
-            id: id,
+            id,
+            name,
+            layout: layout_for(version),
+            storage,
         }
-    }
-    fn layout(&self) -> &'static dyn CodexLayout {
-        layout_for(self.version)
     }
     fn open(root_folder: PathBuf) -> anyhow::Result<Codex> {
         // WARN: Incomplete Implementation (works for now)
-        let version = CodexVersion::V1;
-        layout_for(version).open(root_folder)
-    }
-    fn write_first_codex(
-        foldername: &Path,
-        codex_name: &String,
-        generated_id: String,
-    ) -> anyhow::Result<()> {
-        let version = CodexVersion::V1;
-        layout_for(version).write_first_codex(foldername, codex_name, generated_id)
-    }
-    fn validate_codex_at(root_folder: &Path) -> bool {
-        let version = CodexVersion::V1;
-        layout_for(version).validate_codex_at(root_folder)
+        if Codex::validate_codex_at(&root_folder) {
+            anyhow::bail!(
+                "Codex Not Validated, directory given: {}",
+                root_folder.to_string_lossy().to_string()
+            )
+        }
+
+        let read_codex = storage::utils::read_codex_config(&root_folder)?;
+        // Safe because already checked in validate_codex_at associated function at the top
+        let codex_version = CodexVersion::parse(&read_codex.version.codex).unwrap();
+        let storage = Storage::open(&root_folder)?;
+
+        Ok(Codex::new(
+            read_codex.identity.name,
+            read_codex.identity.id,
+            codex_version,
+            storage,
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
+    use std::{fs, os::unix::fs::PermissionsExt};
+
+    use crate::storage::{CODEX_FILE, DATA_FOLDER, DATABASE_FOLDER, INDEXED_FOLDER};
 
     use super::*;
 
@@ -92,7 +70,10 @@ mod tests {
     fn it_should_work() {
         let temp = tempdir().unwrap();
         let foldername = temp.path().join("my_codex");
-        let _ = Codex::build(&foldername).expect("Codex should have worked");
+        let codex_version = CodexVersion::V1;
+        let storage_version = StorageVersion::V1;
+        let _ = Codex::build(&foldername, codex_version, storage_version)
+            .expect("Codex should have worked");
 
         assert!(foldername.join(CODEX_FILE).exists());
         assert!(foldername.join(DATA_FOLDER).exists());
@@ -106,10 +87,28 @@ mod tests {
         let foldername = temp.path().join("my_codex");
         fs::create_dir(&foldername).unwrap();
         fs::write(foldername.join(CODEX_FILE), "somecontent\nversion 1").unwrap();
+        let codex_version = CodexVersion::V1;
+        let storage_version = StorageVersion::V1;
 
-        let result = Codex::build(&foldername);
+        let result = Codex::build(&foldername, codex_version, storage_version);
 
         assert!(result.is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn own_system_test() {
+        use crate::storage::{DATA_FOLDER, DATABASE_FOLDER, INDEXED_FOLDER};
+
+        let codex_path = Path::new("/home/clyde/Documents/first-knowledge").to_path_buf();
+        let codex_version = CodexVersion::V1;
+        let storage_version = StorageVersion::V1;
+        let codex = Codex::build(&codex_path, codex_version, storage_version);
+
+        assert!(codex_path.join(CODEX_FILE).exists());
+        assert!(codex_path.join(DATA_FOLDER).exists());
+        assert!(codex_path.join(INDEXED_FOLDER).exists());
+        assert!(codex_path.join(DATABASE_FOLDER).exists());
     }
 
     #[cfg(unix)]
@@ -120,7 +119,9 @@ mod tests {
 
         let foldername = tempdir.path().join("my_codex");
 
-        let result = Codex::build(&foldername);
+        let codex_version = CodexVersion::V1;
+        let storage_version = StorageVersion::V1;
+        let result = Codex::build(&foldername, codex_version, storage_version);
         assert!(result.is_err());
     }
 }

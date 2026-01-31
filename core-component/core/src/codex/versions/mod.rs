@@ -5,17 +5,22 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::codex::{Codex, file_reading::FileAddedResponse, versions::v1::CodexV1};
+use crate::{
+    codex::{Codex, file_reading::FileAddedResponse, versions::v1::CodexV1},
+    storage::versions::StorageVersion,
+};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodexVersion {
     V1,
+    V2,
 }
 
 impl CodexVersion {
     pub fn parse(version: &str) -> Option<Self> {
         match version {
             "v1.0.0" => Some(Self::V1),
+            "v2.0.0" => Some(Self::V2),
             _ => None,
         }
     }
@@ -23,36 +28,34 @@ impl CodexVersion {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::V1 => "v1.0.0",
+            Self::V2 => "v2.0.0",
         }
     }
 }
 
-pub fn layout_for(version: CodexVersion) -> &'static dyn CodexLayout {
+pub fn layout_for(version: CodexVersion) -> Box<dyn CodexLayout> {
     match version {
-        _ => &CodexV1,
+        CodexVersion::V1 => Box::new(CodexV1),
+        CodexVersion::V2 => Box::new(CodexV1),
     }
 }
 
 pub trait CodexLayout {
-    fn build(&self, root_folder: &Path) -> anyhow::Result<Codex>;
-    fn open(&self, root_folder: PathBuf) -> anyhow::Result<Codex>;
-    fn write_first_codex(
+    fn version(&self) -> CodexVersion;
+    fn build(&self, root_folder: &Path, storage_version: StorageVersion) -> anyhow::Result<Codex>;
+    fn first_codex_content(
         &self,
-        foldername: &Path,
-        codex_name: &String,
-        generated_id: String,
-    ) -> anyhow::Result<()>;
-    fn validate_codex_at(&self, root_folder: &Path) -> bool;
-    fn is_codex(&self, root_folder: &Path) -> bool;
-
+        codex_name: &str,
+        generated_id: &str,
+        storage_version: StorageVersion,
+    ) -> String;
     fn add_file(
         &self,
         codex: &Codex,
-        data: &mut dyn Read,
+        from_filename: &PathBuf,
         byte: usize,
-        filename: &str,
     ) -> anyhow::Result<FileAddedResponse>;
-    fn validate(&self, codex: &Codex) -> bool;
     fn search_files(&self, query: &str) -> Vec<PathBuf>;
     fn read_file(&self, file_name: &str) -> String;
+    fn supported_storage(&self) -> &'static [StorageVersion];
 }
