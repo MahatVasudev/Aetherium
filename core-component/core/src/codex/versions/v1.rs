@@ -4,12 +4,14 @@ use anyhow::Context;
 use uuid;
 
 use crate::{
-    codex::{
-        Codex,
-        file_reading::FileAddedResponse,
-        versions::{CodexLayout, CodexVersion},
+    codex::{Codex, file_reading::FileAddedResponse, layout::CodexLayout, versions::CodexVersion},
+    storage::{
+        Storage,
+        error::StorageError,
+        sqlite_version::{self, SqliteStoreVersion},
+        versions::StorageVersion,
     },
-    storage::{Storage, versions::StorageVersion},
+    storage_assert,
 };
 
 pub struct CodexV1;
@@ -22,14 +24,15 @@ impl CodexLayout for CodexV1 {
         &self,
         root_folder: &std::path::Path,
         storage_version: StorageVersion,
-    ) -> anyhow::Result<crate::codex::Codex> {
+        sqlite_version: SqliteStoreVersion,
+    ) -> Result<crate::codex::Codex, StorageError> {
         // WARN: Incomplete Implementation (works for now)
         if Codex::validate_codex_at(root_folder) {
-            anyhow::bail!("This folder is already an codex")
+            storage_assert!("This folder is already an codex")
         }
 
         if !self.supported_storage().contains(&storage_version) {
-            anyhow::bail!(
+            storage_assert!(
                 "Storage Version {} is not supported on Codex Version {}",
                 storage_version.as_str(),
                 self.version().as_str()
@@ -40,13 +43,17 @@ impl CodexLayout for CodexV1 {
 
         let codex_name = match root_folder.file_name() {
             Some(value) => String::from(value.to_string_lossy()),
-            None => return anyhow::bail!("Codex Name Couldnt be determined"),
+            None => return storage_assert!("Codex Name Couldnt be determined"),
         };
         let iid = uuid::Uuid::new_v4();
         let storage = Storage::build(&tmp.to_path_buf(), storage_version)?;
 
-        let codex_content =
-            self.first_codex_content(&codex_name, &iid.to_string(), storage.version());
+        let codex_content = self.first_codex_content(
+            &codex_name,
+            &iid.to_string(),
+            storage.version(),
+            sqlite_version,
+        );
         if let Err(e) = storage.create_new_codex(&codex_content) {
             let _ = fs::remove_dir_all(&tmp);
             return Err(e);
@@ -67,20 +74,9 @@ impl CodexLayout for CodexV1 {
         codex: &Codex,
         from_filename: &PathBuf,
         byte: usize,
-    ) -> anyhow::Result<crate::codex::file_reading::FileAddedResponse> {
+    ) -> Result<crate::codex::file_reading::FileAddedResponse, StorageError> {
         // WARN: Incomplete Implementation (works for now)
-        let (file_hash, filename) =
-            codex
-                .storage
-                .add_files(from_filename, byte)
-                .with_context(|| {
-                    format!(
-                        "Error adding file {} to Codex {}; codex_id: {}",
-                        from_filename.to_string_lossy().to_string(),
-                        codex.name,
-                        codex.id
-                    )
-                })?;
+        let (file_hash, filename) = codex.storage.add_files(from_filename, byte)?;
 
         Ok(FileAddedResponse {
             file_path: from_filename.to_path_buf(),
@@ -93,7 +89,7 @@ impl CodexLayout for CodexV1 {
         todo!()
     }
 
-    fn read_file(&self, file_name: &str) -> String {
+    fn read_file(&self, codex: &Codex, file_id: &str) -> String {
         todo!()
     }
     fn first_codex_content(
@@ -101,12 +97,21 @@ impl CodexLayout for CodexV1 {
         codex_name: &str,
         generated_id: &str,
         storage_version: StorageVersion,
+        sqlite_version: SqliteStoreVersion,
     ) -> String {
         let created_time = chrono::Local::now();
         let version = self.version().as_str();
         let storage_ver = storage_version.as_str();
+        let sqlite_ver = sqlite_version.as_str();
         let codex_content = format!(
-            "[identity]\nid=\"{generated_id}\"\nname=\"{codex_name}\"\n[version]\ncodex=\"{version}\"\nstorage=\"{storage_ver}\"\ncreated_at=\"{created_time}\""
+            "[identity]
+id=\"{generated_id}\"
+name=\"{codex_name}\"
+[version]
+codex=\"{version}\"
+storage=\"{storage_ver}\"
+storage_sqlite=\"{sqlite_ver}\"
+created_at=\"{created_time}\""
         );
 
         String::from(codex_content)

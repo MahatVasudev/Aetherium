@@ -1,14 +1,23 @@
 pub mod codex_config;
 pub mod file_reading;
+pub mod layout;
 pub mod utils;
 pub mod versions;
 
-use anyhow::anyhow;
+use crate::{
+    codex::layout::CodexLayout,
+    storage::{
+        self, Storage,
+        error::StorageError,
+        sqlite_version::{self, SqliteStoreVersion},
+        versions::StorageVersion,
+    },
+    storage_assert,
+};
 
-use crate::storage::{self, Storage, versions::StorageVersion};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use crate::codex::versions::{CodexLayout, CodexVersion, layout_for, v1::CodexV1};
+use crate::codex::versions::{CodexVersion, layout_for};
 
 pub struct Codex {
     pub id: String,
@@ -22,9 +31,10 @@ impl Codex {
         root_folder: &PathBuf,
         codex_version: CodexVersion,
         storage_version: StorageVersion,
-    ) -> anyhow::Result<Codex> {
+        sqlite_version: SqliteStoreVersion,
+    ) -> Result<Codex, StorageError> {
         // WARN: Incomplete Implementation (works for now)
-        layout_for(codex_version).build(root_folder, storage_version)
+        layout_for(codex_version).build(root_folder, storage_version, sqlite_version)
     }
     fn new(name: String, id: String, version: CodexVersion, storage: Storage) -> Codex {
         Codex {
@@ -34,10 +44,10 @@ impl Codex {
             storage,
         }
     }
-    fn open(root_folder: PathBuf) -> anyhow::Result<Codex> {
+    fn open(root_folder: PathBuf) -> Result<Codex, StorageError> {
         // WARN: Incomplete Implementation (works for now)
-        if Codex::validate_codex_at(&root_folder) {
-            anyhow::bail!(
+        if !Codex::validate_codex_at(&root_folder) {
+            storage_assert!(
                 "Codex Not Validated, directory given: {}",
                 root_folder.to_string_lossy().to_string()
             )
@@ -62,6 +72,7 @@ mod tests {
     use std::{fs, os::unix::fs::PermissionsExt};
 
     use crate::storage::{CODEX_FILE, DATA_FOLDER, DATABASE_FOLDER, INDEXED_FOLDER};
+    use std::path::Path;
 
     use super::*;
 
@@ -72,7 +83,8 @@ mod tests {
         let foldername = temp.path().join("my_codex");
         let codex_version = CodexVersion::V1;
         let storage_version = StorageVersion::V1;
-        let _ = Codex::build(&foldername, codex_version, storage_version)
+        let sqlite_version = SqliteStoreVersion::V1;
+        let _ = Codex::build(&foldername, codex_version, storage_version, sqlite_version)
             .expect("Codex should have worked");
 
         assert!(foldername.join(CODEX_FILE).exists());
@@ -89,13 +101,15 @@ mod tests {
         fs::write(foldername.join(CODEX_FILE), "somecontent\nversion 1").unwrap();
         let codex_version = CodexVersion::V1;
         let storage_version = StorageVersion::V1;
+        let sqlite_version = SqliteStoreVersion::V1;
 
-        let result = Codex::build(&foldername, codex_version, storage_version);
+        let result = Codex::build(&foldername, codex_version, storage_version, sqlite_version);
 
         assert!(result.is_err());
     }
 
     #[cfg(unix)]
+    #[ignore = "Running In Own System"]
     #[test]
     fn own_system_test() {
         use crate::storage::{DATA_FOLDER, DATABASE_FOLDER, INDEXED_FOLDER};
@@ -103,8 +117,10 @@ mod tests {
         let codex_path = Path::new("/home/clyde/Documents/first-knowledge").to_path_buf();
         let codex_version = CodexVersion::V1;
         let storage_version = StorageVersion::V1;
-        let codex = Codex::build(&codex_path, codex_version, storage_version);
+        let sqlite_version = SqliteStoreVersion::V1;
+        let codex = Codex::build(&codex_path, codex_version, storage_version, sqlite_version);
 
+        assert!(codex.is_ok());
         assert!(codex_path.join(CODEX_FILE).exists());
         assert!(codex_path.join(DATA_FOLDER).exists());
         assert!(codex_path.join(INDEXED_FOLDER).exists());
@@ -121,7 +137,8 @@ mod tests {
 
         let codex_version = CodexVersion::V1;
         let storage_version = StorageVersion::V1;
-        let result = Codex::build(&foldername, codex_version, storage_version);
+        let sqlite_version = SqliteStoreVersion::V1;
+        let result = Codex::build(&foldername, codex_version, storage_version, sqlite_version);
         assert!(result.is_err());
     }
 }

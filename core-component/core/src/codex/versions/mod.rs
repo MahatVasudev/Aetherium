@@ -1,14 +1,6 @@
 pub mod v1;
 
-use std::{
-    io::Read,
-    path::{Path, PathBuf},
-};
-
-use crate::{
-    codex::{Codex, file_reading::FileAddedResponse, versions::v1::CodexV1},
-    storage::versions::StorageVersion,
-};
+use crate::codex::{layout::CodexLayout, versions::v1::CodexV1};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodexVersion {
@@ -38,24 +30,4 @@ pub fn layout_for(version: CodexVersion) -> Box<dyn CodexLayout> {
         CodexVersion::V1 => Box::new(CodexV1),
         CodexVersion::V2 => Box::new(CodexV1),
     }
-}
-
-pub trait CodexLayout {
-    fn version(&self) -> CodexVersion;
-    fn build(&self, root_folder: &Path, storage_version: StorageVersion) -> anyhow::Result<Codex>;
-    fn first_codex_content(
-        &self,
-        codex_name: &str,
-        generated_id: &str,
-        storage_version: StorageVersion,
-    ) -> String;
-    fn add_file(
-        &self,
-        codex: &Codex,
-        from_filename: &PathBuf,
-        byte: usize,
-    ) -> anyhow::Result<FileAddedResponse>;
-    fn search_files(&self, query: &str) -> Vec<PathBuf>;
-    fn read_file(&self, file_name: &str) -> String;
-    fn supported_storage(&self) -> &'static [StorageVersion];
 }

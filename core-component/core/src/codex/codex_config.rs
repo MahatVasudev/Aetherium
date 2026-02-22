@@ -16,5 +16,6 @@ pub struct Identity {
 pub struct Version {
     pub codex: String,
     pub storage: String,
+    pub storage_sqlite: String,
     pub created_at: String,
 }

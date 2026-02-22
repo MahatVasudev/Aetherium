@@ -1,22 +1,22 @@
-use std::{
-    fs,
-    io::Read,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use blake3::Hash;
 use uuid::Uuid;
 
 use crate::{
     codex::{
-        Codex, CodexLayout, utils,
+        Codex,
         versions::{CodexVersion, layout_for},
     },
-    storage::{self, CODEX_FILE, versions::StorageVersion},
+    storage::{self, CODEX_FILE, error::StorageError, versions::StorageVersion},
 };
 
 impl Codex {
-    fn add_file(&self, from_filename: &PathBuf, bytes: usize) -> anyhow::Result<FileAddedResponse> {
+    fn add_file(
+        &self,
+        from_filename: &PathBuf,
+        bytes: usize,
+    ) -> Result<FileAddedResponse, StorageError> {
         self.layout.add_file(self, from_filename, bytes)
     }
     pub fn validate_codex_at(root_folder: &Path) -> bool {
@@ -40,7 +40,7 @@ impl Codex {
                     return false;
                 }
                 let recorded_codex_version = CodexVersion::parse(&codex_conf.version.codex);
-                if let None = recorded_codex_version {
+                if recorded_codex_version.is_none() {
                     return false;
                 }
                 if let Some(storage_version) = StorageVersion::parse(&codex_conf.version.storage) {
@@ -74,23 +74,63 @@ pub struct FileAddedResponse {
 
 #[cfg(test)]
 mod testing {
-    use std::{fs::File, path::Path};
+    use std::path::Path;
 
     use tempfile::{NamedTempFile, tempdir};
+
+    use crate::storage::{CACHE_DB, CODEX_DB, sqlite_version::SqliteStoreVersion};
 
     use super::*;
     #[ignore = "Testing in your own environment"]
     #[test]
     // Checking whether it works on my local machine, for evidence and satisfaction
     fn writing_file_ok() {
-        let codex =
-            Codex::open(Path::new("/home/clyde/Documents/first-knowledge").to_path_buf()).unwrap();
+        let main_path = Path::new("/home/clyde/Documents/first-knowledge1").to_path_buf();
+
+        let codex_version = CodexVersion::V1;
+        let storage_version = StorageVersion::V1;
+        let sqlite_version = SqliteStoreVersion::V1;
+        let mut codex =
+            Codex::build(&main_path, codex_version, storage_version, sqlite_version).unwrap();
         let raw_filename = Path::new("/home/clyde/Downloads/sml_importance .pdf");
         let buffersize: usize = 512;
 
         let written = codex.add_file(&raw_filename.to_path_buf(), buffersize);
 
-        assert!(written.is_ok())
+        let sqlite_opp = codex.storage.sqlite().unwrap();
+        sqlite_opp.create_base().unwrap();
+        assert!(written.is_ok());
+        assert!(codex.storage.database_folder().join(CODEX_DB).is_file());
+        assert!(codex.storage.database_folder().join(CACHE_DB).is_file());
+
+        assert!(
+            codex
+                .storage
+                .sqlite()
+                .unwrap()
+                .codex_conn
+                .table_exists(Some("main"), "files")
+                .unwrap()
+        );
+        assert!(
+            codex
+                .storage
+                .sqlite()
+                .unwrap()
+                .codex_conn
+                .table_exists(Some("main"), "info")
+                .unwrap()
+        );
+
+        assert!(
+            codex
+                .storage
+                .sqlite()
+                .unwrap()
+                .cache_conn
+                .table_exists(Some("main"), "content_cache")
+                .unwrap()
+        )
     }
     #[test]
     fn writing_file_ok_2() {
@@ -100,10 +140,51 @@ mod testing {
 
         let codex_version = CodexVersion::V1;
         let storage_version = StorageVersion::V1;
-        let codex = Codex::build(&codex_path.keep(), codex_version, storage_version).unwrap();
+        let sqlite_version = SqliteStoreVersion::V1;
+        let mut codex = Codex::build(
+            &codex_path.keep(),
+            codex_version,
+            storage_version,
+            sqlite_version,
+        )
+        .unwrap();
+
         let buffersize: usize = 512;
         let written = codex.add_file(&raw_file.path().to_path_buf(), buffersize);
 
-        assert!(written.is_ok())
+        let sqlite_opp = codex.storage.sqlite().unwrap();
+        sqlite_opp.create_base().unwrap();
+        assert!(written.is_ok());
+        assert!(codex.storage.database_folder().join(CODEX_DB).is_file());
+        assert!(codex.storage.database_folder().join(CACHE_DB).is_file());
+
+        assert!(
+            codex
+                .storage
+                .sqlite()
+                .unwrap()
+                .codex_conn
+                .table_exists(Some("main"), "files")
+                .unwrap()
+        );
+        assert!(
+            codex
+                .storage
+                .sqlite()
+                .unwrap()
+                .codex_conn
+                .table_exists(Some("main"), "info")
+                .unwrap()
+        );
+
+        assert!(
+            codex
+                .storage
+                .sqlite()
+                .unwrap()
+                .cache_conn
+                .table_exists(Some("main"), "content_cache")
+                .unwrap()
+        )
     }
 }
