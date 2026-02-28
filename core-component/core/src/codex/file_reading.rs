@@ -12,7 +12,7 @@ use crate::{
 };
 
 impl Codex {
-    fn add_file(
+    pub fn add_file(
         &self,
         from_filename: &PathBuf,
         bytes: usize,
@@ -90,44 +90,29 @@ mod testing {
         let codex_version = CodexVersion::V1;
         let storage_version = StorageVersion::V1;
         let sqlite_version = SqliteStoreVersion::V1;
-        let mut codex =
+        let codex =
             Codex::build(&main_path, codex_version, storage_version, sqlite_version).unwrap();
         let raw_filename = Path::new("/home/clyde/Downloads/sml_importance .pdf");
         let buffersize: usize = 512;
 
-        let written = codex.add_file(&raw_filename.to_path_buf(), buffersize);
+        let written = codex
+            .add_file(&raw_filename.to_path_buf(), buffersize)
+            .unwrap();
 
         let sqlite_opp = codex.storage.sqlite().unwrap();
         sqlite_opp.create_base().unwrap();
-        assert!(written.is_ok());
+
+        let codex_conn = codex.storage.sqlite().unwrap().codex_conn.borrow_mut();
+
+        // assert!(written.is_ok());
         assert!(codex.storage.database_folder().join(CODEX_DB).is_file());
         assert!(codex.storage.database_folder().join(CACHE_DB).is_file());
 
-        assert!(
-            codex
-                .storage
-                .sqlite()
-                .unwrap()
-                .codex_conn
-                .table_exists(Some("main"), "files")
-                .unwrap()
-        );
-        assert!(
-            codex
-                .storage
-                .sqlite()
-                .unwrap()
-                .codex_conn
-                .table_exists(Some("main"), "info")
-                .unwrap()
-        );
+        assert!(codex_conn.table_exists(Some("main"), "files").unwrap());
+        assert!(codex_conn.table_exists(Some("main"), "info").unwrap());
 
         assert!(
-            codex
-                .storage
-                .sqlite()
-                .unwrap()
-                .cache_conn
+            codex_conn
                 .table_exists(Some("main"), "content_cache")
                 .unwrap()
         )
@@ -141,7 +126,7 @@ mod testing {
         let codex_version = CodexVersion::V1;
         let storage_version = StorageVersion::V1;
         let sqlite_version = SqliteStoreVersion::V1;
-        let mut codex = Codex::build(
+        let codex = Codex::build(
             &codex_path.keep(),
             codex_version,
             storage_version,
@@ -149,40 +134,24 @@ mod testing {
         )
         .unwrap();
 
-        let buffersize: usize = 512;
-        let written = codex.add_file(&raw_file.path().to_path_buf(), buffersize);
-
         let sqlite_opp = codex.storage.sqlite().unwrap();
-        sqlite_opp.create_base().unwrap();
-        assert!(written.is_ok());
+
+        let buffersize: usize = 512;
+        let written = codex
+            .add_file(&raw_file.path().to_path_buf(), buffersize)
+            .unwrap();
+
+        let codex_conn = codex.storage.sqlite().unwrap().codex_conn.borrow_mut();
+        let cache_conn = codex.storage.sqlite().unwrap().cache_conn.borrow_mut();
+        // assert!(written.is_ok());
         assert!(codex.storage.database_folder().join(CODEX_DB).is_file());
         assert!(codex.storage.database_folder().join(CACHE_DB).is_file());
 
-        assert!(
-            codex
-                .storage
-                .sqlite()
-                .unwrap()
-                .codex_conn
-                .table_exists(Some("main"), "files")
-                .unwrap()
-        );
-        assert!(
-            codex
-                .storage
-                .sqlite()
-                .unwrap()
-                .codex_conn
-                .table_exists(Some("main"), "info")
-                .unwrap()
-        );
+        assert!(codex_conn.table_exists(Some("main"), "files").unwrap());
+        assert!(codex_conn.table_exists(Some("main"), "info").unwrap());
 
         assert!(
-            codex
-                .storage
-                .sqlite()
-                .unwrap()
-                .cache_conn
+            cache_conn
                 .table_exists(Some("main"), "content_cache")
                 .unwrap()
         )

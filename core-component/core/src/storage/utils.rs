@@ -2,9 +2,11 @@ use std::{
     fs::{self, File},
     io::{self, BufReader, Read, Write},
     path::Path,
+    time::SystemTime,
 };
 
 use blake3::Hash;
+use chrono::Utc;
 
 use crate::{codex::codex_config::CodexConfig, storage::CODEX_FILE};
 
@@ -46,4 +48,10 @@ pub fn read_codex_config(root_folder: &Path) -> Result<CodexConfig, io::Error> {
     let data: CodexConfig = toml::from_str(read_data.as_str())?;
 
     Ok(data)
+}
+
+pub fn convert_datestring(date: std::time::SystemTime) -> String {
+    let date_convert: chrono::DateTime<Utc> = date.into();
+
+    date_convert.format("%Y-%m-%d").to_string()
 }

@@ -2,6 +2,7 @@
 // DATABASE CORE
 // ==========================================
 
+// TODO: Add an Option for user to add the data as mutable or immutable
 // TODO: Design schema (files, metadata, cache)
 // TODO: Add schema version table
 // TODO: Add migration system

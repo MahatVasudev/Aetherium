@@ -1,23 +1,30 @@
-use rusqlite::Connection;
-
 use crate::storage::{
     CACHE_DB, CODEX_DB, Storage,
     error::{SqliteError, StorageError},
-    sqlite_version::{SqliteStoreVersion, layout::SqliteLayout, v1::SQLITESTOREV1},
+    sqlite_version::{
+        SqliteStoreVersion,
+        layout::SqliteLayout,
+        v1::{
+            SQLITESTOREV1,
+            types::{self, Files},
+        },
+    },
     utils,
 };
+use rusqlite::Connection;
+use std::cell::RefCell;
 
 pub struct SqliteStore {
-    pub cache_conn: Connection,
-    pub codex_conn: Connection,
+    pub cache_conn: RefCell<Connection>,
+    pub codex_conn: RefCell<Connection>,
     layout: Box<dyn SqliteLayout>,
 }
 
 impl SqliteStore {
     fn new(codex_conn: Connection, cache_conn: Connection, version: SqliteStoreVersion) -> Self {
         SqliteStore {
-            cache_conn,
-            codex_conn,
+            cache_conn: RefCell::new(cache_conn),
+            codex_conn: RefCell::new(codex_conn),
             layout: get_sqlite_version(version),
         }
     }
@@ -46,6 +53,12 @@ impl SqliteStore {
             let codex_db = Connection::open(database_folder.join(CODEX_DB))?;
             let cache_db = Connection::open(database_folder.join(CACHE_DB))?;
 
+            // codex_db.execute("PRAGMA journal_mode=WAL;", [])?;
+            // codex_db.execute("PRAGMA busy_timeout=5000;", [])?;
+            //
+            // cache_db.execute("PRAGMA journal_mode=WAL;", [])?;
+            // cache_db.execute("PRAGMA busy_timeout=5000;", [])?;
+
             return Ok(SqliteStore::new(codex_db, cache_db, version));
         }
 
@@ -58,13 +71,79 @@ impl SqliteStore {
         self.layout.create_base(self)
     }
 
-    pub fn delete(&self) -> Result<(), SqliteError> {
-        self.layout.delete(self)
+    pub fn delete(&self, fileid: String) -> Result<(), SqliteError> {
+        self.layout.delete(self, fileid)
+    }
+
+    pub fn add_metadata(&self, file: types::Files) -> Result<(), SqliteError> {
+        self.layout.add_metadata(self, file)
+    }
+
+    pub fn update_hash(&self, fileid: String, hash: String) -> Result<(), SqliteError> {
+        self.layout.update_hash(self, fileid, hash)
+    }
+
+    pub fn get_all_files(&self) -> Result<Vec<Files>, SqliteError> {
+        self.layout.get_all_files(self)
     }
 }
 
 fn get_sqlite_version(version: SqliteStoreVersion) -> Box<dyn SqliteLayout> {
     match version {
         SqliteStoreVersion::V1 => Box::new(SQLITESTOREV1),
+    }
+}
+
+#[cfg(test)]
+mod testing {
+    use std::path::Path;
+
+    use rusqlite::fallible_iterator::Unwrap;
+    use tempfile::tempdir;
+
+    use crate::{
+        codex::{Codex, versions::CodexVersion},
+        storage::{sqlite_version::SqliteStoreVersion, versions::StorageVersion},
+    };
+
+    #[test]
+    fn added_data_consistent() {
+        let dir = tempdir().unwrap();
+
+        let foldername = dir.path().join("my_codex");
+
+        let codex_version = CodexVersion::V1;
+        let storage_version = StorageVersion::V1;
+        let sqlite_version = SqliteStoreVersion::V1;
+
+        let codex =
+            Codex::build(&foldername, codex_version, storage_version, sqlite_version).unwrap();
+        let raw_filename = Path::new("/home/clyde/Downloads/sml_importance .pdf");
+
+        let written = codex.add_file(&raw_filename.to_path_buf(), 512).unwrap();
+        assert_eq!(
+            codex
+                .storage
+                .sqlite()
+                .unwrap()
+                .get_all_files()
+                .unwrap()
+                .get(0)
+                .unwrap()
+                .id,
+            written.file_id
+        );
+        assert_eq!(
+            codex
+                .storage
+                .sqlite()
+                .unwrap()
+                .get_all_files()
+                .unwrap()
+                .get(0)
+                .unwrap()
+                .hash,
+            written.file_hash.to_hex().to_string()
+        );
     }
 }

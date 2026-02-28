@@ -27,7 +27,10 @@ pub struct Codex {
 }
 
 impl Codex {
-    fn build(
+    pub fn version(&self) -> CodexVersion {
+        self.layout.version()
+    }
+    pub fn build(
         root_folder: &PathBuf,
         codex_version: CodexVersion,
         storage_version: StorageVersion,
@@ -44,7 +47,7 @@ impl Codex {
             storage,
         }
     }
-    fn open(root_folder: PathBuf) -> Result<Codex, StorageError> {
+    pub fn open(root_folder: PathBuf) -> Result<Codex, StorageError> {
         // WARN: Incomplete Implementation (works for now)
         if !Codex::validate_codex_at(&root_folder) {
             storage_assert!(

@@ -1,4 +1,3 @@
-use blake3::Hash;
 use uuid::Uuid;
 
 use crate::{
@@ -6,12 +5,15 @@ use crate::{
     storage::{
         CODEX_FILE, DATA_FOLDER, DATABASE_FOLDER, INDEXED_FOLDER, Storage,
         error::StorageError,
+        sqlite_version::v1::types::Files,
+        storage_types::{self, FileInSystem},
         utils,
         versions::{StorageVersion, layout::StorageLayout},
     },
     storage_assert,
 };
 use std::{
+    collections::HashMap,
     fs::{self, File},
     io::{self, ErrorKind},
     path::PathBuf,
@@ -64,7 +66,7 @@ impl StorageLayout for StorageV1 {
         storage: &Storage,
         from_filename: &PathBuf,
         byte: usize,
-    ) -> Result<(Hash, String), StorageError> {
+    ) -> Result<storage_types::FileInSystem, StorageError> {
         if byte == 0 {
             return storage_assert!("buffer size must be greater than 0, got: {}", byte);
         }
@@ -84,13 +86,19 @@ impl StorageLayout for StorageV1 {
             fs::remove_file(&tmpfolder.join(&filename))?;
         }
 
-        let (file_hash, file_id) = result?;
+        result?;
         fs::rename(
             tmpfolder.join(&filename),
-            storage.data_folder.join(&file_id),
+            storage.data_folder.join(&filename),
         )?;
 
-        return Ok((file_hash, file_id));
+        let modified_at =
+            utils::convert_datestring(storage.data_folder.join(&filename).metadata()?.modified()?);
+        return Ok(FileInSystem {
+            id: filename,
+            extention: "".into(),
+            modified_at,
+        });
     }
 
     fn create_new_codex_file(&self, storage: &Storage, content: &str) -> Result<(), StorageError> {
@@ -144,30 +152,104 @@ impl StorageLayout for StorageV1 {
         Ok(())
     }
 
-    fn list_files(&self, storage: &Storage, query: &str) -> Result<Vec<String>, StorageError> {
+    fn list_files(&self, storage: &Storage) -> Result<Vec<FileInSystem>, StorageError> {
         // Go to Data Location
-        // find all of the files if the query is empty, else return the list of files that satisfy
-        // under those query
-        // WARN: The above specified implementation for query is only when data is saved sqlite, for now
-        // return all of the files list, with only file id
+        // find all of the files
         // TODO: Afer Implementing SQLITE Management, we will return a list of a struct which
         // should contain file id, name, extension, date added
         let entries = fs::read_dir(&storage.data_folder)?;
 
-        let files: Vec<String> = entries
-            .filter_map(|entry| {
-                let entry = entry.ok()?;
+        let files = entries
+            .map(|entry| -> Result<FileInSystem, StorageError> {
+                let entry = entry?;
                 let path = entry.path();
 
-                if path.is_file() {
-                    path.file_name()
-                        .map(|name| name.to_string_lossy().to_string())
-                } else {
-                    None
+                if !path.is_file() {
+                    return Err(storage_assert!("non file entry found in data folder"));
                 }
+
+                let file_name = path
+                    .file_name()
+                    .ok_or_else(|| StorageError::Corrupt("file missing name".into()))?
+                    .to_string_lossy()
+                    .to_string();
+
+                let extention = path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                let modified_at = utils::convert_datestring(path.metadata()?.modified()?);
+
+                Ok(FileInSystem {
+                    id: file_name,
+                    extention,
+                    modified_at,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, StorageError>>()?;
 
         Ok(files)
+    }
+
+    fn sync(&self, storage: &Storage) -> Result<(), StorageError> {
+        // FIX: Check if data has been updated between file-system and sqlite
+        // Treat filesystem as the ground truth, and sqlite as the overview of filesystem
+        //
+        // NOTE: Working
+        // - Check all files present in sqlite, and check all files present in file system,
+        // - If files id is present in file system and not in sqlite, add data in sqlite
+        // - if files id is present in sqlite and not in file system then remove data id in sqlite
+
+        // Make hash set of ids from both file system and sqlite
+
+        // Make hash of each data to see whether they have been changed or not, if they have update
+        // the hash in the sqlite and update modified at
+
+        // VULN: Currently this approach is very unsafe, as we also have to check whether the files
+        // in filesystem are valid uuid they are
+        // valid uuid....
+        // We also have to check before adding the file to the sql that there are no same hash, if
+        // they are same, we delete the file
+
+        let fis = storage.list_files()?;
+        let fisql = storage.sqlite()?.get_all_files()?;
+
+        let fis_map: HashMap<String, FileInSystem> =
+            fis.into_iter().map(|f| (f.id.clone(), f)).collect();
+        let fisql_map: HashMap<String, Files> =
+            fisql.into_iter().map(|f| (f.id.clone(), f)).collect();
+
+        for (id, fs_file) in &fis_map {
+            if !fisql_map.contains_key(id) {
+                storage.sqlite()?.add_metadata(Files {
+                    id: id.into(),
+                    name: "some name".into(),
+                    hash: fs_file.get_hash(&storage)?.to_hex().to_string(),
+                    extension: fs_file.extention.clone(),
+                    created_at: None,
+                    modified_at: None,
+                })?;
+            }
+        }
+
+        for (id, _) in &fisql_map {
+            if !fisql_map.contains_key(id) {
+                storage.sqlite()?.delete(id.into())?;
+            }
+        }
+
+        for (id, fs_file) in &fis_map {
+            if let Some(sqlfile) = fisql_map.get(id) {
+                let current_hash = fs_file.get_hash(storage)?.to_hex().to_string();
+
+                if current_hash != sqlfile.hash {
+                    storage.sqlite()?.update_hash(id.into(), current_hash)?;
+                }
+            }
+        }
+
+        Ok(())
     }
 }

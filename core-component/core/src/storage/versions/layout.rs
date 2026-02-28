@@ -4,7 +4,12 @@ use blake3::Hash;
 
 use crate::{
     codex::codex_config::CodexConfig,
-    storage::{Storage, error::StorageError, versions::StorageVersion},
+    storage::{
+        Storage,
+        error::StorageError,
+        storage_types::{self, FileInSystem},
+        versions::StorageVersion,
+    },
 };
 
 pub trait StorageLayout {
@@ -16,7 +21,7 @@ pub trait StorageLayout {
         storage: &Storage,
         from_filename: &PathBuf,
         byte: usize,
-    ) -> Result<(Hash, String), StorageError>;
+    ) -> Result<storage_types::FileInSystem, StorageError>;
     fn create_new_codex_file(&self, storage: &Storage, content: &str) -> Result<(), StorageError>;
     fn exists_dirs(&self, root_folder: &PathBuf) -> bool;
     fn all_folders(&self) -> &'static [&'static str];
@@ -28,5 +33,6 @@ pub trait StorageLayout {
         file_id: &str,
     ) -> Result<Box<dyn io::Read>, StorageError>;
     fn delete_file(&self, storage: &Storage, file_id: &str) -> Result<(), StorageError>;
-    fn list_files(&self, storage: &Storage, query: &str) -> Result<Vec<String>, StorageError>;
+    fn list_files(&self, storage: &Storage) -> Result<Vec<FileInSystem>, StorageError>;
+    fn sync(&self, storage: &Storage) -> Result<(), StorageError>;
 }

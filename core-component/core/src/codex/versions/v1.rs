@@ -1,4 +1,4 @@
-use std::{fs, io::Read, path::PathBuf};
+use std::{ffi::OsStr, fs, io::Read, path::PathBuf};
 
 use anyhow::Context;
 use uuid;
@@ -6,7 +6,7 @@ use uuid;
 use crate::{
     codex::{Codex, file_reading::FileAddedResponse, layout::CodexLayout, versions::CodexVersion},
     storage::{
-        Storage,
+        self, Storage,
         error::StorageError,
         sqlite_version::{self, SqliteStoreVersion},
         versions::StorageVersion,
@@ -61,6 +61,8 @@ impl CodexLayout for CodexV1 {
         fs::rename(&tmp, &root_folder)?;
 
         let storage = Storage::open(&root_folder.to_path_buf())?;
+
+        storage.sqlite()?.create_base()?;
         Ok(Codex::new(
             codex_name,
             iid.to_string(),
@@ -76,12 +78,29 @@ impl CodexLayout for CodexV1 {
         byte: usize,
     ) -> Result<crate::codex::file_reading::FileAddedResponse, StorageError> {
         // WARN: Incomplete Implementation (works for now)
-        let (file_hash, filename) = codex.storage.add_files(from_filename, byte)?;
+        let file = codex.storage.add_files(from_filename, byte)?;
+        let hash = file.get_hash(&codex.storage)?;
+
+        codex
+            .storage
+            .sqlite()?
+            .add_metadata(sqlite_version::v1::types::Files {
+                id: file.id.clone(),
+                name: from_filename
+                    .file_name()
+                    .unwrap_or(&OsStr::new("Untitled"))
+                    .to_string_lossy()
+                    .to_string(),
+                hash: hash.to_hex().to_string(),
+                extension: file.extention.clone(),
+                created_at: None,
+                modified_at: None,
+            })?;
 
         Ok(FileAddedResponse {
             file_path: from_filename.to_path_buf(),
-            file_id: filename,
-            file_hash,
+            file_id: file.id.clone(),
+            file_hash: file.get_hash(&codex.storage)?,
         })
     }
 

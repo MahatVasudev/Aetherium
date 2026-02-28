@@ -1,10 +1,12 @@
 use blake3::Hash;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use crate::{
     storage::{
         error::StorageError,
         sqlite::SqliteStore,
+        storage_types::FileInSystem,
         versions::{StorageVersion, layout::StorageLayout, load_storageversion},
     },
     storage_assert,
@@ -12,6 +14,7 @@ use crate::{
 pub mod error;
 pub mod sqlite;
 pub mod sqlite_version;
+pub mod storage_types;
 pub mod utils;
 pub mod versions;
 
@@ -30,7 +33,7 @@ pub struct Storage {
     indexed_folder: PathBuf,
     database_folder: PathBuf,
     layout: Box<dyn StorageLayout>,
-    sqlite: Option<SqliteStore>,
+    sqlite: OnceLock<SqliteStore>,
 }
 
 impl Storage {
@@ -41,17 +44,21 @@ impl Storage {
             database_folder: root_folder.join(DATABASE_FOLDER),
             root_folder: root_folder.clone(),
             layout: load_storageversion(&version),
-            sqlite: None,
+            sqlite: OnceLock::new(),
         }
     }
 
-    pub fn sqlite(&mut self) -> Result<&mut SqliteStore, StorageError> {
-        if self.sqlite.is_none() {
-            let store = SqliteStore::open(self)?;
-            self.sqlite = Some(store);
+    pub fn sqlite(&self) -> Result<&SqliteStore, StorageError> {
+        if let Some(store) = self.sqlite.get() {
+            return Ok(store);
         }
 
-        Ok(self.sqlite.as_mut().unwrap())
+        let store = SqliteStore::open(self)?;
+
+        // ignore error if already initialized by race
+        let _ = self.sqlite.set(store);
+
+        Ok(self.sqlite.get().unwrap())
     }
 
     pub fn root_folder(&self) -> &PathBuf {
@@ -104,8 +111,12 @@ impl Storage {
         &self,
         from_filename: &PathBuf,
         byte: usize,
-    ) -> Result<(Hash, String), StorageError> {
+    ) -> Result<FileInSystem, StorageError> {
         self.layout.add_files(self, from_filename, byte)
+    }
+
+    pub fn list_files(&self) -> Result<Vec<FileInSystem>, StorageError> {
+        self.layout.list_files(self)
     }
 
     pub fn create_new_codex(&self, content: &str) -> Result<(), StorageError> {
@@ -118,5 +129,9 @@ impl Storage {
 
     pub fn all_folders(&self) -> &'static [&'static str] {
         self.layout.all_folders()
+    }
+
+    pub fn sync(&self) -> Result<(), StorageError> {
+        self.layout.sync(self)
     }
 }
