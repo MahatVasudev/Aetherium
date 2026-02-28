@@ -53,5 +53,5 @@ pub fn read_codex_config(root_folder: &Path) -> Result<CodexConfig, io::Error> {
 pub fn convert_datestring(date: std::time::SystemTime) -> String {
     let date_convert: chrono::DateTime<Utc> = date.into();
 
-    date_convert.format("%Y-%m-%d").to_string()
+    date_convert.format("%Y-%m-%d %H:%M:%S").to_string()
 }

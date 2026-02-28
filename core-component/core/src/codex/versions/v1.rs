@@ -133,7 +133,7 @@ storage_sqlite=\"{sqlite_ver}\"
 created_at=\"{created_time}\""
         );
 
-        String::from(codex_content)
+        codex_content
     }
 
     fn supported_storage(&self) -> &'static [StorageVersion] {

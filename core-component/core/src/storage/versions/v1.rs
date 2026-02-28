@@ -158,37 +158,35 @@ impl StorageLayout for StorageV1 {
         // TODO: Afer Implementing SQLITE Management, we will return a list of a struct which
         // should contain file id, name, extension, date added
         let entries = fs::read_dir(&storage.data_folder)?;
+        let mut files: Vec<FileInSystem> = vec![];
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
 
-        let files = entries
-            .map(|entry| -> Result<FileInSystem, StorageError> {
-                let entry = entry?;
-                let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
 
-                if !path.is_file() {
-                    return Err(storage_assert!("non file entry found in data folder"));
-                }
+            let file_name = path
+                .file_name()
+                .ok_or_else(|| StorageError::Corrupt("file missing name".into()))?
+                .to_string_lossy()
+                .to_string();
 
-                let file_name = path
-                    .file_name()
-                    .ok_or_else(|| StorageError::Corrupt("file missing name".into()))?
-                    .to_string_lossy()
-                    .to_string();
+            let extention = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("")
+                .to_string();
 
-                let extention = path
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .unwrap_or("")
-                    .to_string();
+            let modified_at = utils::convert_datestring(path.metadata()?.modified()?);
 
-                let modified_at = utils::convert_datestring(path.metadata()?.modified()?);
-
-                Ok(FileInSystem {
-                    id: file_name,
-                    extention,
-                    modified_at,
-                })
+            files.push(FileInSystem {
+                id: file_name,
+                extention,
+                modified_at,
             })
-            .collect::<Result<Vec<_>, StorageError>>()?;
+        }
 
         Ok(files)
     }
