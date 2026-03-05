@@ -74,11 +74,11 @@ pub struct FileAddedResponse {
 
 #[cfg(test)]
 mod testing {
-    use std::path::Path;
+    use std::{fs, path::Path};
 
     use tempfile::{NamedTempFile, tempdir};
 
-    use crate::storage::{CACHE_DB, CODEX_DB, sqlite_version::SqliteStoreVersion};
+    use crate::storage::{CACHE_DB, CODEX_DB, DATA_FOLDER, sqlite_version::SqliteStoreVersion};
 
     use super::*;
     #[ignore = "Testing in your own environment"]
@@ -99,11 +99,30 @@ mod testing {
             .add_file(&raw_filename.to_path_buf(), buffersize)
             .unwrap();
 
+        let name = Uuid::new_v4().to_string();
+        fs::write(main_path.join(DATA_FOLDER).join(&name), b"hello world").unwrap();
+
+        println!(
+            "{:?}",
+            fs::read_dir(codex.storage.data_folder())
+                .unwrap()
+                .map(|f| f.unwrap().path().to_string_lossy().to_string())
+                .collect::<Vec<String>>()
+        );
+
+        codex.storage.sync().unwrap();
+
+        fs::write(
+            main_path.join(DATA_FOLDER).join(&name),
+            b"hello world changed",
+        )
+        .unwrap();
+
+        codex.storage.sync().unwrap();
         let sqlite_opp = codex.storage.sqlite().unwrap();
-        sqlite_opp.create_base().unwrap();
 
-        let codex_conn = codex.storage.sqlite().unwrap().codex_conn.borrow_mut();
-
+        let codex_conn = sqlite_opp.codex_conn.borrow_mut();
+        let cache_conn = sqlite_opp.cache_conn.borrow_mut();
         // assert!(written.is_ok());
         assert!(codex.storage.database_folder().join(CODEX_DB).is_file());
         assert!(codex.storage.database_folder().join(CACHE_DB).is_file());
@@ -112,7 +131,7 @@ mod testing {
         assert!(codex_conn.table_exists(Some("main"), "info").unwrap());
 
         assert!(
-            codex_conn
+            cache_conn
                 .table_exists(Some("main"), "content_cache")
                 .unwrap()
         )

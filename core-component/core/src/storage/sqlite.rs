@@ -6,13 +6,13 @@ use crate::storage::{
         layout::SqliteLayout,
         v1::{
             SQLITESTOREV1,
-            types::{self, Files},
+            types::{self, FileInSQL},
         },
     },
     utils,
 };
 use rusqlite::Connection;
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::HashMap};
 
 pub struct SqliteStore {
     pub cache_conn: RefCell<Connection>,
@@ -75,7 +75,7 @@ impl SqliteStore {
         self.layout.delete(self, fileid)
     }
 
-    pub fn add_metadata(&self, file: types::Files) -> Result<(), SqliteError> {
+    pub fn add_metadata(&self, file: &types::FileInSQL) -> Result<(), SqliteError> {
         self.layout.add_metadata(self, file)
     }
 
@@ -83,8 +83,16 @@ impl SqliteStore {
         self.layout.update_hash(self, fileid, hash)
     }
 
-    pub fn get_all_files(&self) -> Result<Vec<Files>, SqliteError> {
+    pub fn get_all_files(&self) -> Result<Vec<FileInSQL>, SqliteError> {
         self.layout.get_all_files(self)
+    }
+
+    pub fn reindex_file(
+        &self,
+        file: &FileInSQL,
+        term_frequencies: &HashMap<String, usize>,
+    ) -> Result<(), SqliteError> {
+        self.layout.reindex_file(self, file, term_frequencies)
     }
 }
 

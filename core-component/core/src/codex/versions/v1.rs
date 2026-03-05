@@ -1,17 +1,17 @@
-use std::{ffi::OsStr, fs, io::Read, path::PathBuf};
+use std::{ffi::OsStr, fs, path::PathBuf};
 
-use anyhow::Context;
 use uuid;
 
 use crate::{
     codex::{Codex, file_reading::FileAddedResponse, layout::CodexLayout, versions::CodexVersion},
     storage::{
-        self, Storage,
+        Storage,
         error::StorageError,
         sqlite_version::{self, SqliteStoreVersion},
         versions::StorageVersion,
     },
     storage_assert,
+    tfidf::TFIDFCorpus,
 };
 
 pub struct CodexV1;
@@ -81,21 +81,24 @@ impl CodexLayout for CodexV1 {
         let file = codex.storage.add_files(from_filename, byte)?;
         let hash = file.get_hash(&codex.storage)?;
 
-        codex
-            .storage
-            .sqlite()?
-            .add_metadata(sqlite_version::v1::types::Files {
-                id: file.id.clone(),
-                name: from_filename
-                    .file_name()
-                    .unwrap_or(&OsStr::new("Untitled"))
-                    .to_string_lossy()
-                    .to_string(),
-                hash: hash.to_hex().to_string(),
-                extension: file.extention.clone(),
-                created_at: None,
-                modified_at: None,
-            })?;
+        let fileinsql = sqlite_version::v1::types::FileInSQL {
+            id: file.id.clone(),
+            name: from_filename
+                .file_name()
+                .unwrap_or(&OsStr::new("Untitled"))
+                .to_string_lossy()
+                .to_string(),
+            hash: hash.to_hex().to_string(),
+            extension: file.extention.clone(),
+            created_at: None,
+            modified_at: None,
+        };
+        codex.storage.sqlite()?.add_metadata(&fileinsql)?;
+
+        if file.extention.starts_with("text/") {
+            let tf = TFIDFCorpus::compute_tf(codex.storage.data_folder().join(&file.id), byte)?;
+            codex.storage.sqlite()?.reindex_file(&fileinsql, &tf)?;
+        }
 
         Ok(FileAddedResponse {
             file_path: from_filename.to_path_buf(),

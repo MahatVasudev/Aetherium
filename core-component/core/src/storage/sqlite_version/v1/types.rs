@@ -1,4 +1,4 @@
-pub struct Files {
+pub struct FileInSQL {
     pub id: String,
     pub name: String,
     pub hash: String,

@@ -12,6 +12,7 @@ uuid = { version = "1.6", features = ["v4", "fast-rng"] }
 toml = "0.5.8"
 serde = { version = "1.0.136", features = ["derive"] }
 rusqlite = { version = "0.38.0", features = ["bundled"] }
+infer = "0.9"
 
 [dev-dependencies]
 tempfile = "3"

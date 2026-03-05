@@ -1,6 +1,8 @@
 pub mod types;
 pub mod utils;
 
+use uuid::Uuid;
+
 use crate::storage::{
     error::SqliteError,
     sqlite::SqliteStore,
@@ -41,7 +43,10 @@ impl SqliteLayout for SQLITESTOREV1 {
         Ok(())
     }
 
-    fn get_all_files(&self, sqlite_store: &SqliteStore) -> Result<Vec<types::Files>, SqliteError> {
+    fn get_all_files(
+        &self,
+        sqlite_store: &SqliteStore,
+    ) -> Result<Vec<types::FileInSQL>, SqliteError> {
         // FIXME: Add a batch retrieval, so that it is scalable
         let codex_conn = sqlite_store.codex_conn.borrow_mut();
         let mut query = codex_conn.prepare(
@@ -58,7 +63,7 @@ impl SqliteLayout for SQLITESTOREV1 {
 
         let files = query
             .query_map((), |row| {
-                Ok(types::Files {
+                Ok(types::FileInSQL {
                     id: row.get(0)?,
                     name: row.get(1)?,
                     hash: row.get(2)?,
@@ -75,7 +80,7 @@ impl SqliteLayout for SQLITESTOREV1 {
     fn add_metadata(
         &self,
         sqlite_store: &SqliteStore,
-        file: types::Files,
+        file: &types::FileInSQL,
     ) -> Result<(), SqliteError> {
         let mut codex_conn = sqlite_store.codex_conn.borrow_mut();
         let codex_txn = codex_conn.transaction()?;
@@ -84,7 +89,12 @@ impl SqliteLayout for SQLITESTOREV1 {
             "
         insert into files (id, name, extensions, hash)
         values (?1,?2,?3,?4);",
-            (file.id, file.name, file.extension, file.hash),
+            (
+                file.id.clone(),
+                file.name.clone(),
+                file.extension.clone(),
+                file.hash.clone(),
+            ),
         )?;
 
         codex_txn.commit()?;
@@ -143,5 +153,55 @@ impl SqliteLayout for SQLITESTOREV1 {
             (Ok(_), Ok(_)) => Ok(()),
             _ => Err(SqliteError::AssertionFail("failed to commit".into())),
         }
+    }
+
+    fn reindex_file(
+        &self,
+        sqlite_store: &SqliteStore,
+        file: &types::FileInSQL,
+        term_frequencies: &std::collections::HashMap<String, usize>,
+    ) -> Result<(), SqliteError> {
+        let mut conn = sqlite_store.codex_conn.borrow_mut();
+        let txn = conn.transaction()?;
+
+        txn.execute(
+            "
+        update keywords set doc_count = doc_count - 1
+        where id in (
+          select id from files_keywords where id = ?1
+        )
+            ",
+            [&file.id],
+        )?;
+
+        txn.execute("delete from keywords where doc_count <= 0", [])?;
+
+        for (term, &count) in term_frequencies {
+            txn.execute(
+                "insert into keywords (id, name, doc_count)
+                values (?1, ?2, 1)
+                on conflict(name) do update set doc_count = doc_count + 1",
+                [Uuid::new_v4().to_string(), term.clone()],
+            )?;
+
+            let keyword_id: String =
+                txn.query_row("select id from keywords where name = ?1", [term], |f| {
+                    f.get(0)
+                })?;
+
+            txn.execute(
+                "INSERT OR REPLACE INTO files_keywords (file_id, keyword_id, frequency)
+             VALUES (?1, ?2, ?3)",
+                (&file.id, &keyword_id, count as i64),
+            )?;
+        }
+
+        txn.execute(
+            "UPDATE files SET indexed_at = current_timestamp WHERE id = ?1",
+            [&file.id],
+        )?;
+        txn.commit()?;
+
+        Ok(())
     }
 }

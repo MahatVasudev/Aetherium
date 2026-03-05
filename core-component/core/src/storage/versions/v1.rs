@@ -1,3 +1,4 @@
+use infer::Infer;
 use uuid::Uuid;
 
 use crate::{
@@ -5,12 +6,13 @@ use crate::{
     storage::{
         CODEX_FILE, DATA_FOLDER, DATABASE_FOLDER, INDEXED_FOLDER, Storage,
         error::StorageError,
-        sqlite_version::v1::types::Files,
+        sqlite_version::v1::types::FileInSQL,
         storage_types::{self, FileInSystem},
         utils,
         versions::{StorageVersion, layout::StorageLayout},
     },
     storage_assert,
+    tfidf::TFIDFCorpus,
 };
 use std::{
     collections::HashMap,
@@ -54,7 +56,7 @@ impl StorageLayout for StorageV1 {
             }
         }
 
-        return true;
+        true
     }
 
     fn all_folders(&self) -> &'static [&'static str] {
@@ -87,18 +89,19 @@ impl StorageLayout for StorageV1 {
         }
 
         result?;
-        fs::rename(
-            tmpfolder.join(&filename),
-            storage.data_folder.join(&filename),
-        )?;
+
+        let final_file_name = storage.data_folder.join(&filename);
+        fs::rename(tmpfolder.join(&filename), &final_file_name)?;
+
+        let mime: String = utils::get_data_extension(&filename)?;
 
         let modified_at =
             utils::convert_datestring(storage.data_folder.join(&filename).metadata()?.modified()?);
-        return Ok(FileInSystem {
+        Ok(FileInSystem {
             id: filename,
-            extention: "".into(),
+            extention: mime,
             modified_at,
-        });
+        })
     }
 
     fn create_new_codex_file(&self, storage: &Storage, content: &str) -> Result<(), StorageError> {
@@ -173,17 +176,12 @@ impl StorageLayout for StorageV1 {
                 .to_string_lossy()
                 .to_string();
 
-            let extention = path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .unwrap_or("")
-                .to_string();
-
+            let mime = utils::get_data_extension(&path)?;
             let modified_at = utils::convert_datestring(path.metadata()?.modified()?);
 
             files.push(FileInSystem {
                 id: file_name,
-                extention,
+                extention: mime,
                 modified_at,
             })
         }
@@ -216,24 +214,28 @@ impl StorageLayout for StorageV1 {
 
         let fis_map: HashMap<String, FileInSystem> =
             fis.into_iter().map(|f| (f.id.clone(), f)).collect();
-        let fisql_map: HashMap<String, Files> =
+        let fisql_map: HashMap<String, FileInSQL> =
             fisql.into_iter().map(|f| (f.id.clone(), f)).collect();
 
         for (id, fs_file) in &fis_map {
             if !fisql_map.contains_key(id) {
-                storage.sqlite()?.add_metadata(Files {
+                let file = FileInSQL {
                     id: id.into(),
-                    name: "some name".into(),
+                    name: "Untitled".into(),
                     hash: fs_file.get_hash(&storage)?.to_hex().to_string(),
                     extension: fs_file.extention.clone(),
                     created_at: None,
                     modified_at: None,
-                })?;
+                };
+                storage.sqlite()?.add_metadata(&file)?;
+
+                let tf = TFIDFCorpus::compute_tf(storage.data_folder().join(&id), 150)?;
+                storage.sqlite()?.reindex_file(&file, &tf)?;
             }
         }
 
         for (id, _) in &fisql_map {
-            if !fisql_map.contains_key(id) {
+            if !fis_map.contains_key(id) {
                 storage.sqlite()?.delete(id.into())?;
             }
         }
@@ -244,6 +246,9 @@ impl StorageLayout for StorageV1 {
 
                 if current_hash != sqlfile.hash {
                     storage.sqlite()?.update_hash(id.into(), current_hash)?;
+
+                    let tf = TFIDFCorpus::compute_tf(storage.data_folder().join(&id), 150)?;
+                    storage.sqlite()?.reindex_file(&sqlfile, &tf)?;
                 }
             }
         }

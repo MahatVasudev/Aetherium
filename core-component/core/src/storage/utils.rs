@@ -7,8 +7,14 @@ use std::{
 
 use blake3::Hash;
 use chrono::Utc;
+use infer::Infer;
 
-use crate::{codex::codex_config::CodexConfig, storage::CODEX_FILE};
+use crate::{
+    codex::codex_config::CodexConfig,
+    storage::{CODEX_FILE, error::StorageError},
+};
+
+pub const UNKNOWN_EXTENSION: &str = "unknown-content";
 
 /// write_to_file
 /// returns anyhow::Result<tuple(blake3::Hash,String)>
@@ -54,4 +60,19 @@ pub fn convert_datestring(date: std::time::SystemTime) -> String {
     let date_convert: chrono::DateTime<Utc> = date.into();
 
     date_convert.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+pub fn get_data_extension<P: AsRef<Path>>(file_path: P) -> Result<String, StorageError> {
+    // get_data_extension will return the files extension
+    // Will return an error if file is not found, or if there are permission issues
+    // if no extension is found then UNKNOWN_EXTENSION will be returned
+    let extension = Infer::new().get_from_path(&file_path);
+
+    let mut mime: String = UNKNOWN_EXTENSION.into();
+
+    if let Some(ext) = &extension? {
+        mime = ext.mime_type().into();
+    }
+
+    Ok(mime)
 }

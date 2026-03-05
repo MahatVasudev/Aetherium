@@ -46,14 +46,16 @@ pub fn initialize_tables_codex(codex_txn: &Transaction) -> Result<(), SqliteErro
                         extensions text not null,
                         hash text not null,
                         created_at datetime default current_timestamp,
-                        modified_at datetime default current_timestamp
+                        modified_at datetime default current_timestamp,
+                        indexed_at datetime default current_timestamp
                 )",
         (),
     )?;
     codex_txn.execute(
         "create table if not exists keywords (
                         id text primary key,
-                        name text not null,
+                        name text not null unique,
+                        doc_count integer not null default 1,
                         created_at datetime default current_timestamp
                 )",
         (),
@@ -63,7 +65,7 @@ pub fn initialize_tables_codex(codex_txn: &Transaction) -> Result<(), SqliteErro
         "create table if not exists files_keywords (
                     file_id text not null,
                     keyword_id text not null,
-
+                    frequency integer not null default 1,
                     foreign key (file_id) references files(id),
                     foreign key (keyword_id) references keywords(id)
                 )",

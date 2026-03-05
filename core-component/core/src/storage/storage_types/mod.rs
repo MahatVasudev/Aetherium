@@ -19,17 +19,12 @@ impl FileInSystem {
             return Err(StorageError::NotFound(file_id));
         }
 
-        let extensions = file_name
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("")
-            .to_string();
-
+        let mime = utils::get_data_extension(&file_name)?;
         let modified_at = utils::convert_datestring(file_name.metadata()?.modified()?);
 
         Ok(Self {
             id: file_id,
-            extention: extensions,
+            extention: mime,
             modified_at,
         })
     }
