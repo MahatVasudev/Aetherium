@@ -1,6 +1,6 @@
 pub mod error;
+pub mod handler;
 mod handlers;
-pub mod hanlder;
 pub mod ml_client;
 pub mod types;
 
