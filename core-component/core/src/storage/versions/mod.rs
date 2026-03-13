@@ -9,6 +9,9 @@ pub enum StorageVersion {
 }
 
 impl StorageVersion {
+    pub fn latest() -> Self {
+        StorageVersion::V1
+    }
     pub fn parse(version: &str) -> Option<StorageVersion> {
         match version {
             "v1" => Some(StorageVersion::V1),

@@ -7,12 +7,12 @@ use crate::{
     storage::{
         Storage,
         error::StorageError,
-        storage_types::{self, FileInSystem},
+        storage_types::{self, FileInSystem, SyncEvent},
         versions::StorageVersion,
     },
 };
 
-pub trait StorageLayout {
+pub trait StorageLayout: Send + Sync {
     fn version(&self) -> StorageVersion;
     fn build(&self, root_folder: &PathBuf) -> Result<Storage, StorageError>;
     fn make_dirs(&self, root_folder: &PathBuf) -> Result<(), StorageError>;
@@ -34,5 +34,5 @@ pub trait StorageLayout {
     ) -> Result<Box<dyn io::Read>, StorageError>;
     fn delete_file(&self, storage: &Storage, file_id: &str) -> Result<(), StorageError>;
     fn list_files(&self, storage: &Storage) -> Result<Vec<FileInSystem>, StorageError>;
-    fn sync(&self, storage: &Storage) -> Result<(), StorageError>;
+    fn sync(&self, storage: &Storage, on_progress: &dyn Fn(SyncEvent)) -> Result<(), StorageError>;
 }

@@ -1,35 +1,38 @@
-use crate::storage::{
-    CACHE_DB, CODEX_DB, Storage,
-    error::{SqliteError, StorageError},
-    sqlite_version::{
-        SqliteStoreVersion,
-        layout::SqliteLayout,
-        v1::{
-            SQLITESTOREV1,
-            types::{self, FileInSQL},
+use crate::{
+    storage::{
+        CACHE_DB, CODEX_DB, Storage,
+        error::{SqliteError, StorageError},
+        sqlite_version::{
+            SqliteStoreVersion,
+            layout::SqliteLayout,
+            v1::{
+                SQLITESTOREV1,
+                types::{self, FileInSQL},
+            },
         },
+        utils,
     },
-    utils,
+    storage_assert,
 };
 use rusqlite::Connection;
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap, sync::Mutex};
 
 pub struct SqliteStore {
-    pub cache_conn: RefCell<Connection>,
-    pub codex_conn: RefCell<Connection>,
+    pub cache_conn: Mutex<Connection>,
+    pub codex_conn: Mutex<Connection>,
     layout: Box<dyn SqliteLayout>,
 }
 
 impl SqliteStore {
     fn new(codex_conn: Connection, cache_conn: Connection, version: SqliteStoreVersion) -> Self {
         SqliteStore {
-            cache_conn: RefCell::new(cache_conn),
-            codex_conn: RefCell::new(codex_conn),
+            cache_conn: Mutex::new(cache_conn),
+            codex_conn: Mutex::new(codex_conn),
             layout: get_sqlite_version(version),
         }
     }
 
-    fn version(&self) -> SqliteStoreVersion {
+    pub fn version(&self) -> SqliteStoreVersion {
         self.layout.version()
     }
 
@@ -41,6 +44,8 @@ impl SqliteStore {
         let codex_db = Connection::open(database_folder.join(CODEX_DB))?;
         let cache_db = Connection::open(database_folder.join(CACHE_DB))?;
 
+        codex_db.execute_batch("PRAGMA foreign_keys = ON;")?;
+
         Ok(SqliteStore::new(codex_db, cache_db, version))
     }
 
@@ -49,7 +54,11 @@ impl SqliteStore {
     ) -> Result<crate::storage::sqlite::SqliteStore, SqliteError> {
         if let Ok(read_codex) = utils::read_codex_config(storage.root_folder()) {
             let database_folder = &storage.database_folder;
-            let version = SqliteStoreVersion::parse(&read_codex.version.storage_sqlite);
+            let Some(version) = SqliteStoreVersion::parse(&read_codex.version.sqlitestore) else {
+                return Err(SqliteError::AssertionFail(
+                    "invalid SqliteStore Version Received".into(),
+                ));
+            };
             let codex_db = Connection::open(database_folder.join(CODEX_DB))?;
             let cache_db = Connection::open(database_folder.join(CACHE_DB))?;
 
@@ -132,8 +141,17 @@ mod testing {
             Codex::build(&foldername, codex_version, storage_version, sqlite_version).unwrap();
         let raw_filename = Path::new("/home/clyde/Downloads/sml_importance .pdf");
 
-        let written = codex.add_file(&raw_filename.to_path_buf(), 512).unwrap();
+        let written = codex
+            .add_file(&raw_filename.to_path_buf(), None, 512)
+            .unwrap();
 
+        let written1 = codex
+            .add_file(&raw_filename.to_path_buf(), None, 512)
+            .unwrap();
+
+        fs::remove_file(codex.storage.data_folder().join(written1.file_id)).unwrap();
+
+        codex.storage.sync(&|_| {}).unwrap();
         println!(
             "consistent {:?}",
             fs::read_dir(codex.storage.data_folder())
@@ -180,7 +198,9 @@ mod testing {
         let codex =
             Codex::build(&foldername, codex_version, storage_version, sqlite_version).unwrap();
         let raw_filename = Path::new("/home/clyde/Downloads/sml_importance .pdf");
-        let written = codex.add_file(&raw_filename.to_path_buf(), 512).unwrap();
+        let written = codex
+            .add_file(&raw_filename.to_path_buf(), None, 512)
+            .unwrap();
         let mut name = Uuid::new_v4().to_string();
         name.push_str(".txt");
         println!("{name}");
@@ -194,7 +214,7 @@ mod testing {
                 .collect::<Vec<String>>()
         );
 
-        codex.storage.sync().unwrap();
+        codex.storage.sync(&|_| {}).unwrap();
 
         assert_eq!(
             codex
@@ -224,7 +244,9 @@ mod testing {
         let codex =
             Codex::build(&foldername, codex_version, storage_version, sqlite_version).unwrap();
         let raw_filename = Path::new("/home/clyde/Downloads/sml_importance .pdf");
-        let written = codex.add_file(&raw_filename.to_path_buf(), 512).unwrap();
+        let written = codex
+            .add_file(&raw_filename.to_path_buf(), None, 512)
+            .unwrap();
         let name = Uuid::new_v4().to_string();
         fs::write(foldername.join(DATA_FOLDER).join(&name), b"hello world").unwrap();
 
@@ -236,7 +258,7 @@ mod testing {
                 .collect::<Vec<String>>()
         );
 
-        codex.storage.sync().unwrap();
+        codex.storage.sync(&|_| {}).unwrap();
 
         fs::write(
             foldername.join(DATA_FOLDER).join(&name),
@@ -244,7 +266,7 @@ mod testing {
         )
         .unwrap();
 
-        codex.storage.sync().unwrap();
+        codex.storage.sync(&|_| {}).unwrap();
         assert_eq!(
             codex
                 .storage

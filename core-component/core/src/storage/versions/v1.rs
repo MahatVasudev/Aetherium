@@ -2,12 +2,12 @@ use infer::Infer;
 use uuid::Uuid;
 
 use crate::{
-    codex::codex_config::CodexConfig,
+    codex::{self, codex_config::CodexConfig},
     storage::{
         CODEX_FILE, DATA_FOLDER, DATABASE_FOLDER, INDEXED_FOLDER, Storage,
         error::StorageError,
         sqlite_version::v1::types::FileInSQL,
-        storage_types::{self, FileInSystem},
+        storage_types::{self, FileInSystem, SyncEvent},
         utils,
         versions::{StorageVersion, layout::StorageLayout},
     },
@@ -18,7 +18,7 @@ use std::{
     collections::HashMap,
     fs::{self, File},
     io::{self, ErrorKind},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 pub struct StorageV1;
@@ -93,8 +93,7 @@ impl StorageLayout for StorageV1 {
         let final_file_name = storage.data_folder.join(&filename);
         fs::rename(tmpfolder.join(&filename), &final_file_name)?;
 
-        let mime: String = utils::get_data_extension(&filename)?;
-
+        let mime: String = utils::get_data_extension(&from_filename)?;
         let modified_at =
             utils::convert_datestring(storage.data_folder.join(&filename).metadata()?.modified()?);
         Ok(FileInSystem {
@@ -105,8 +104,11 @@ impl StorageLayout for StorageV1 {
     }
 
     fn create_new_codex_file(&self, storage: &Storage, content: &str) -> Result<(), StorageError> {
-        fs::write(&storage.root_folder.join(CODEX_FILE), content)?;
-
+        let codex_file = storage.root_folder.join(CODEX_FILE);
+        fs::write(&codex_file, content)?;
+        let mut perms = fs::metadata(&codex_file)?.permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&codex_file, perms)?;
         Ok(())
     }
     fn read_codex_file(&self, storage: &Storage) -> Result<CodexConfig, StorageError> {
@@ -145,9 +147,9 @@ impl StorageLayout for StorageV1 {
         // TODO: After Implementing SQLITE Management, The record of the data, and any indexes,
         // caches should be removed, iff the data is removed from the data location
 
-        let file_path = storage.data_folder.join(file_id);
+        let file_path = std::path::absolute(storage.data_folder().join(file_id))?;
 
-        if !file_path.is_file() {
+        if !file_path.is_file() && file_path.starts_with(storage.data_folder()) {
             return Err(StorageError::not_found(file_id));
         }
         fs::remove_file(file_path)?;
@@ -189,7 +191,7 @@ impl StorageLayout for StorageV1 {
         Ok(files)
     }
 
-    fn sync(&self, storage: &Storage) -> Result<(), StorageError> {
+    fn sync(&self, storage: &Storage, on_progress: &dyn Fn(SyncEvent)) -> Result<(), StorageError> {
         // FIX: Check if data has been updated between file-system and sqlite
         // Treat filesystem as the ground truth, and sqlite as the overview of filesystem
         //
@@ -208,15 +210,16 @@ impl StorageLayout for StorageV1 {
         // valid uuid....
         // We also have to check before adding the file to the sql that there are no same hash, if
         // they are same, we delete the file
-
         let fis = storage.list_files()?;
         let fisql = storage.sqlite()?.get_all_files()?;
-
+        let mut added: usize = 0;
+        let mut removed: usize = 0;
+        let mut updated: usize = 0;
         let fis_map: HashMap<String, FileInSystem> =
             fis.into_iter().map(|f| (f.id.clone(), f)).collect();
         let fisql_map: HashMap<String, FileInSQL> =
             fisql.into_iter().map(|f| (f.id.clone(), f)).collect();
-
+        let sqlite_conn = storage.sqlite()?;
         for (id, fs_file) in &fis_map {
             if !fisql_map.contains_key(id) {
                 let file = FileInSQL {
@@ -226,17 +229,31 @@ impl StorageLayout for StorageV1 {
                     extension: fs_file.extention.clone(),
                     created_at: None,
                     modified_at: None,
+                    embedded_at: None,
+                    indexed_at: None,
                 };
                 storage.sqlite()?.add_metadata(&file)?;
+                if fs_file.extention.starts_with("text/") {
+                    let tf = TFIDFCorpus::compute_tf(storage.data_folder().join(&id), 150)?;
+                    sqlite_conn.reindex_file(&file, &tf)?;
+                }
 
-                let tf = TFIDFCorpus::compute_tf(storage.data_folder().join(&id), 150)?;
-                storage.sqlite()?.reindex_file(&file, &tf)?;
+                on_progress(SyncEvent::FileAdded {
+                    id: file.id,
+                    name: file.name,
+                });
+
+                added += 1;
             }
         }
 
         for (id, _) in &fisql_map {
             if !fis_map.contains_key(id) {
-                storage.sqlite()?.delete(id.into())?;
+                sqlite_conn.delete(id.into())?;
+
+                on_progress(SyncEvent::FileRemoved { id: id.clone() });
+
+                removed += 1;
             }
         }
 
@@ -247,11 +264,23 @@ impl StorageLayout for StorageV1 {
                 if current_hash != sqlfile.hash {
                     storage.sqlite()?.update_hash(id.into(), current_hash)?;
 
-                    let tf = TFIDFCorpus::compute_tf(storage.data_folder().join(&id), 150)?;
-                    storage.sqlite()?.reindex_file(&sqlfile, &tf)?;
+                    if fs_file.extention.starts_with("text/") {
+                        let tf = TFIDFCorpus::compute_tf(storage.data_folder().join(&id), 150)?;
+                        storage.sqlite()?.reindex_file(&sqlfile, &tf)?;
+                    }
+
+                    on_progress(SyncEvent::FileUpdated { id: id.clone() });
+
+                    updated += 1;
                 }
             }
         }
+
+        on_progress(SyncEvent::Done {
+            added,
+            removed,
+            updated,
+        });
 
         Ok(())
     }

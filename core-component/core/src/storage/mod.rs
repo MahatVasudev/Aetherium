@@ -6,7 +6,7 @@ use crate::{
     storage::{
         error::StorageError,
         sqlite::SqliteStore,
-        storage_types::FileInSystem,
+        storage_types::{FileInSystem, SyncEvent},
         versions::{StorageVersion, layout::StorageLayout, load_storageversion},
     },
     storage_assert,
@@ -115,6 +115,10 @@ impl Storage {
         self.layout.add_files(self, from_filename, byte)
     }
 
+    pub fn delete_file(&self, file_id: &str) -> Result<(), StorageError> {
+        self.layout.delete_file(self, file_id)
+    }
+
     pub fn list_files(&self) -> Result<Vec<FileInSystem>, StorageError> {
         self.layout.list_files(self)
     }
@@ -131,7 +135,7 @@ impl Storage {
         self.layout.all_folders()
     }
 
-    pub fn sync(&self) -> Result<(), StorageError> {
-        self.layout.sync(self)
+    pub fn sync(&self, on_progress: &dyn Fn(SyncEvent)) -> Result<(), StorageError> {
+        self.layout.sync(self, on_progress)
     }
 }
