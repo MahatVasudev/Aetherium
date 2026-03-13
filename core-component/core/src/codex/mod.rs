@@ -15,9 +15,12 @@ use crate::{
     storage_assert,
 };
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::codex::versions::{CodexVersion, layout_for};
+
+pub const DEFAULT_CHUNK_SIZE: usize = 512;
+pub const DEFAULT_READ_CHUNK_SIZE: usize = 512;
 
 pub struct Codex {
     pub id: String,
@@ -30,14 +33,14 @@ impl Codex {
     pub fn version(&self) -> CodexVersion {
         self.layout.version()
     }
-    pub fn build(
-        root_folder: &PathBuf,
+    pub fn build<P: AsRef<Path>>(
+        root_folder: P,
         codex_version: CodexVersion,
         storage_version: StorageVersion,
         sqlite_version: SqliteStoreVersion,
     ) -> Result<Codex, StorageError> {
         // WARN: Incomplete Implementation (works for now)
-        layout_for(codex_version).build(root_folder, storage_version, sqlite_version)
+        layout_for(codex_version).build(root_folder.as_ref(), storage_version, sqlite_version)
     }
     fn new(name: String, id: String, version: CodexVersion, storage: Storage) -> Codex {
         Codex {
@@ -49,15 +52,22 @@ impl Codex {
     }
     pub fn open(root_folder: PathBuf) -> Result<Codex, StorageError> {
         // WARN: Incomplete Implementation (works for now)
+
+        let mut root_folder = root_folder;
         if !Codex::validate_codex_at(&root_folder) {
-            storage_assert!(
-                "Codex Not Validated, directory given: {}",
-                root_folder.to_string_lossy().to_string()
-            )
+            root_folder = match Codex::find_codex_root(&root_folder) {
+                Some(fl) => fl,
+                None => {
+                    storage_assert!(
+                        "Codex Not Validated, directory given: {}",
+                        root_folder.to_string_lossy().to_string()
+                    )
+                }
+            }
         }
 
         let read_codex = storage::utils::read_codex_config(&root_folder)?;
-        // Safe because already checked in validate_codex_at associated function at the top
+        // NOTE: Safe because already checked in validate_codex_at associated function at the top
         let codex_version = CodexVersion::parse(&read_codex.version.codex).unwrap();
         let storage = Storage::open(&root_folder)?;
 
@@ -67,6 +77,18 @@ impl Codex {
             codex_version,
             storage,
         ))
+    }
+    pub fn find_codex_root(start: &Path) -> Option<PathBuf> {
+        let mut current = start;
+        loop {
+            if Codex::validate_codex_at(current) {
+                return Some(current.to_path_buf());
+            }
+            match current.parent() {
+                Some(parent) => current = parent,
+                None => return None,
+            }
+        }
     }
 }
 

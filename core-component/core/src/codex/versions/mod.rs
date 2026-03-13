@@ -9,6 +9,9 @@ pub enum CodexVersion {
 }
 
 impl CodexVersion {
+    pub fn latest() -> Self {
+        CodexVersion::V1
+    }
     pub fn parse(version: &str) -> Option<Self> {
         match version {
             "v1.0.0" => Some(Self::V1),

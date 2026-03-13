@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    convert::identity,
+    path::{Path, PathBuf},
+};
 
 use blake3::Hash;
 use uuid::Uuid;
@@ -6,20 +9,39 @@ use uuid::Uuid;
 use crate::{
     codex::{
         Codex,
+        codex_config::{
+            self, CONFIG_CODEX_VERSION, CONFIG_CREATED_AT, CONFIG_ID, CONFIG_NAME,
+            CONFIG_READ_CHUNK_SIZE, CONFIG_SQLITESTORE_VERSION, CONFIG_STORAGE_VERSION,
+            CONFIG_WRITE_CHUNK_SIZE, CodexConfig, ConfigValue,
+        },
+        utils,
         versions::{CodexVersion, layout_for},
     },
-    storage::{self, CODEX_FILE, error::StorageError, versions::StorageVersion},
+    storage::{self, CODEX_FILE, Storage, error::StorageError, versions::StorageVersion},
+    storage_assert,
 };
 
 impl Codex {
     pub fn add_file(
         &self,
         from_filename: &PathBuf,
+        name: Option<String>,
         bytes: usize,
     ) -> Result<FileAddedResponse, StorageError> {
-        self.layout.add_file(self, from_filename, bytes)
+        self.layout.add_file(self, from_filename, name, bytes)
     }
-    pub fn validate_codex_at(root_folder: &Path) -> bool {
+
+    pub fn read_config(&self) -> Result<CodexConfig, StorageError> {
+        if !Self::validate_codex_at(self.storage.root_folder()) {
+            return Err(StorageError::Corrupt("Codex is not validated".into()));
+        }
+
+        let codexconfig = storage::utils::read_codex_config(self.storage.root_folder())?;
+
+        Ok(codexconfig)
+    }
+
+    pub fn validate_codex_at<P: AsRef<Path>>(root_folder: P) -> bool {
         // Validates Codex - By
         //  - If codex.toml exists in the given path
         //  - If structure is valid
@@ -28,7 +50,7 @@ impl Codex {
         //
         // If any error occurs, then just return false
         //  All or Nothing Approach
-        let codex = root_folder.join(CODEX_FILE);
+        let codex = root_folder.as_ref().join(CODEX_FILE);
 
         if !codex.exists() {
             return false;
@@ -57,6 +79,73 @@ impl Codex {
             _ => return false,
         }
         true
+    }
+
+    pub fn is_inside_codex<P: AsRef<Path>>(path: P) -> bool {
+        let mut current_path = path.as_ref();
+
+        loop {
+            if Codex::validate_codex_at(current_path) {
+                return true;
+            } else {
+                match current_path.parent() {
+                    Some(p) => current_path = p,
+                    None => return false,
+                }
+            }
+        }
+    }
+
+    pub fn get_config(&self, key: String) -> Result<ConfigValue, StorageError> {
+        let config = self.read_config()?;
+        match key.as_str() {
+            CONFIG_ID => Ok(ConfigValue::Str(config.identity.id)),
+            CONFIG_NAME => Ok(ConfigValue::Str(config.identity.name)),
+            CONFIG_CODEX_VERSION => Ok(ConfigValue::Str(config.version.codex)),
+            CONFIG_STORAGE_VERSION => Ok(ConfigValue::Str(config.version.storage)),
+            CONFIG_SQLITESTORE_VERSION => Ok(ConfigValue::Str(config.version.sqlitestore)),
+            CONFIG_CREATED_AT => Ok(ConfigValue::Str(config.version.created_at)),
+            CONFIG_READ_CHUNK_SIZE => Ok(ConfigValue::UINT(config.settings.read_chunk_size)),
+            CONFIG_WRITE_CHUNK_SIZE => Ok(ConfigValue::UINT(config.settings.write_chunk_size)),
+
+            _ => Err(StorageError::NotFound("key not found".into())),
+        }
+    }
+
+    pub fn change_config(&self, key: &str, value: &str) -> Result<(), StorageError> {
+        let mut config = self.read_config()?;
+        match key {
+            CONFIG_WRITE_CHUNK_SIZE => {
+                config.settings.write_chunk_size = value.parse::<usize>().map_err(|_| {
+                    StorageError::AssertionFail(format!(
+                        "{CONFIG_WRITE_CHUNK_SIZE} must be a valid number"
+                    ))
+                })?;
+            }
+            CONFIG_READ_CHUNK_SIZE => {
+                config.settings.read_chunk_size = value.parse::<usize>().map_err(|_| {
+                    StorageError::AssertionFail(format!(
+                        "{CONFIG_READ_CHUNK_SIZE} must be a valid number"
+                    ))
+                })?;
+            }
+
+            _ => {
+                return Err(StorageError::AssertionFail(
+                    "key not found or is not editable".into(),
+                ));
+            }
+        };
+
+        let content = toml::to_string(&config).map_err(|e| StorageError::Corrupt(e.to_string()))?;
+
+        utils::write_codex_config(self.storage.root_folder(), &content)?;
+
+        return Ok(());
+    }
+
+    pub fn delete_file(&self, file_id: String) -> Result<(), StorageError> {
+        self.layout.delete_file(self, &file_id)
     }
     fn search_files(&self, query: &str) -> Vec<PathBuf> {
         unimplemented!()
@@ -96,7 +185,7 @@ mod testing {
         let buffersize: usize = 512;
 
         let written = codex
-            .add_file(&raw_filename.to_path_buf(), buffersize)
+            .add_file(&raw_filename.to_path_buf(), None, buffersize)
             .unwrap();
 
         let name = Uuid::new_v4().to_string();
@@ -110,7 +199,7 @@ mod testing {
                 .collect::<Vec<String>>()
         );
 
-        codex.storage.sync().unwrap();
+        codex.storage.sync(&|_| {}).unwrap();
 
         fs::write(
             main_path.join(DATA_FOLDER).join(&name),
@@ -118,11 +207,11 @@ mod testing {
         )
         .unwrap();
 
-        codex.storage.sync().unwrap();
+        codex.storage.sync(&|_| {}).unwrap();
         let sqlite_opp = codex.storage.sqlite().unwrap();
 
-        let codex_conn = sqlite_opp.codex_conn.borrow_mut();
-        let cache_conn = sqlite_opp.cache_conn.borrow_mut();
+        let codex_conn = sqlite_opp.codex_conn.lock().unwrap();
+        let cache_conn = sqlite_opp.cache_conn.lock().unwrap();
         // assert!(written.is_ok());
         assert!(codex.storage.database_folder().join(CODEX_DB).is_file());
         assert!(codex.storage.database_folder().join(CACHE_DB).is_file());
@@ -157,11 +246,11 @@ mod testing {
 
         let buffersize: usize = 512;
         let written = codex
-            .add_file(&raw_file.path().to_path_buf(), buffersize)
+            .add_file(&raw_file.path().to_path_buf(), None, buffersize)
             .unwrap();
 
-        let codex_conn = codex.storage.sqlite().unwrap().codex_conn.borrow_mut();
-        let cache_conn = codex.storage.sqlite().unwrap().cache_conn.borrow_mut();
+        let codex_conn = codex.storage.sqlite().unwrap().codex_conn.lock().unwrap();
+        let cache_conn = codex.storage.sqlite().unwrap().cache_conn.lock().unwrap();
         // assert!(written.is_ok());
         assert!(codex.storage.database_folder().join(CODEX_DB).is_file());
         assert!(codex.storage.database_folder().join(CACHE_DB).is_file());

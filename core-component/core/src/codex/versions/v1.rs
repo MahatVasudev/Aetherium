@@ -1,11 +1,22 @@
-use std::{ffi::OsStr, fs, path::PathBuf};
+use std::{
+    ffi::OsStr,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use uuid;
 
 use crate::{
-    codex::{Codex, file_reading::FileAddedResponse, layout::CodexLayout, versions::CodexVersion},
+    codex::{
+        Codex, DEFAULT_CHUNK_SIZE, DEFAULT_READ_CHUNK_SIZE,
+        codex_config::{self, CodexConfigWrite},
+        file_reading::FileAddedResponse,
+        layout::CodexLayout,
+        utils,
+        versions::CodexVersion,
+    },
     storage::{
-        Storage,
+        self, Storage,
         error::StorageError,
         sqlite_version::{self, SqliteStoreVersion},
         versions::StorageVersion,
@@ -22,12 +33,12 @@ impl CodexLayout for CodexV1 {
     }
     fn build(
         &self,
-        root_folder: &std::path::Path,
+        root_folder: &Path,
         storage_version: StorageVersion,
         sqlite_version: SqliteStoreVersion,
     ) -> Result<crate::codex::Codex, StorageError> {
         // WARN: Incomplete Implementation (works for now)
-        if Codex::validate_codex_at(root_folder) {
+        if Codex::is_inside_codex(root_folder) {
             storage_assert!("This folder is already an codex")
         }
 
@@ -54,10 +65,14 @@ impl CodexLayout for CodexV1 {
             storage.version(),
             sqlite_version,
         );
-        if let Err(e) = storage.create_new_codex(&codex_content) {
+
+        let codex_config_ = storage.create_new_codex(&codex_content);
+
+        if let Err(e) = codex_config_ {
             let _ = fs::remove_dir_all(&tmp);
             return Err(e);
         }
+
         fs::rename(&tmp, &root_folder)?;
 
         let storage = Storage::open(&root_folder.to_path_buf())?;
@@ -75,23 +90,30 @@ impl CodexLayout for CodexV1 {
         &self,
         codex: &Codex,
         from_filename: &PathBuf,
+        name: Option<String>,
         byte: usize,
     ) -> Result<crate::codex::file_reading::FileAddedResponse, StorageError> {
         // WARN: Incomplete Implementation (works for now)
         let file = codex.storage.add_files(from_filename, byte)?;
         let hash = file.get_hash(&codex.storage)?;
-
-        let fileinsql = sqlite_version::v1::types::FileInSQL {
-            id: file.id.clone(),
-            name: from_filename
+        let filename = match name {
+            None => from_filename
                 .file_name()
                 .unwrap_or(&OsStr::new("Untitled"))
                 .to_string_lossy()
                 .to_string(),
+
+            Some(n) => n,
+        };
+        let fileinsql = sqlite_version::v1::types::FileInSQL {
+            id: file.id.clone(),
+            name: filename,
             hash: hash.to_hex().to_string(),
             extension: file.extention.clone(),
             created_at: None,
             modified_at: None,
+            embedded_at: None,
+            indexed_at: None,
         };
         codex.storage.sqlite()?.add_metadata(&fileinsql)?;
 
@@ -125,18 +147,26 @@ impl CodexLayout for CodexV1 {
         let version = self.version().as_str();
         let storage_ver = storage_version.as_str();
         let sqlite_ver = sqlite_version.as_str();
-        let codex_content = format!(
-            "[identity]
-id=\"{generated_id}\"
-name=\"{codex_name}\"
-[version]
-codex=\"{version}\"
-storage=\"{storage_ver}\"
-storage_sqlite=\"{sqlite_ver}\"
-created_at=\"{created_time}\""
-        );
+        let config = CodexConfigWrite {
+            identity_id: generated_id.into(),
+            identity_name: codex_name.into(),
+            version_codex: version.into(),
+            version_storage: storage_ver.into(),
+            version_sqlitestore: sqlite_ver.into(),
+            version_created_at: created_time.to_string(),
+            settings_read_chunk_size: DEFAULT_READ_CHUNK_SIZE,
+            settings_write_chunk_size: DEFAULT_READ_CHUNK_SIZE,
+        };
 
-        codex_content
+        codex_config::get_codex_config_template(&config)
+    }
+
+    fn delete_file(&self, codex: &Codex, file_id: &str) -> Result<(), StorageError> {
+        codex.storage.delete_file(file_id)?;
+
+        codex.storage.sqlite()?.delete(file_id.into())?;
+
+        Ok(())
     }
 
     fn supported_storage(&self) -> &'static [StorageVersion] {
