@@ -1,5 +1,5 @@
 [package]
-name = "core"
+name = "aetherium-core"
 version = "0.1.0"
 edition = "2024"
 
@@ -13,6 +13,7 @@ toml = "0.5.8"
 serde = { version = "1.0.136", features = ["derive"] }
 rusqlite = { version = "0.38.0", features = ["bundled"] }
 infer = "0.9"
+dirs = "5"
 
 [dev-dependencies]
 tempfile = "3"
