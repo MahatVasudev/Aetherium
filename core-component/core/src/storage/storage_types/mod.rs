@@ -30,7 +30,6 @@ impl FileInSystem {
     }
     pub fn get_hash(&self, storage: &Storage) -> Result<blake3::Hash, StorageError> {
         let file_name = storage.data_folder().join(&self.id);
-
         if !file_name.is_file() {
             return Err(StorageError::NotFound(self.id.clone()));
         }
@@ -60,4 +59,22 @@ impl FileInSystem {
 
         Ok(file_hash)
     }
+}
+
+pub enum SyncEvent {
+    FileAdded {
+        id: String,
+        name: String,
+    },
+    FileRemoved {
+        id: String,
+    },
+    FileUpdated {
+        id: String,
+    },
+    Done {
+        added: usize,
+        removed: usize,
+        updated: usize,
+    },
 }
