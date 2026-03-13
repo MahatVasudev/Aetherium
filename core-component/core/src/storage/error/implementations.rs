@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, sync::LockResult};
 
 use crate::storage::error::{SqliteError, StorageError};
 
@@ -11,12 +11,28 @@ impl StorageError {
             | StorageError::InvalidFileId(v) => v,
             StorageError::AssertionFail(v) => v,
             StorageError::Io(_) => "io error",
-            StorageError::SqliteError(_) => "sqlite error",
+            StorageError::SqliteError(_) => self.message(),
         }
     }
 
     pub fn is_fatal(&self) -> bool {
         matches!(self, StorageError::Corrupt(_))
+    }
+}
+
+impl SqliteError {
+    pub fn message(&self) -> &str {
+        use SqliteError::*;
+        match self {
+            DeleteFail(v) => v,
+            Corrupt(v) => v,
+            OpenFail(v) => v,
+            NotFound(v) => v,
+            InvalidQuery(v) => v,
+            AssertionFail(v) => v,
+            CreateFail(v) => v,
+            LockPoisoned => "Mutex lock poisoned",
+        }
     }
 }
 
@@ -65,6 +81,7 @@ impl fmt::Display for SqliteError {
             SqliteError::InvalidQuery(v) => write!(f, "passed an invalid query, {v}"),
             SqliteError::AssertionFail(v) => write!(f, "assertion error, {v}"),
             SqliteError::NotFound(v) => write!(f, "entries not found, {v}"),
+            SqliteError::LockPoisoned => write!(f, "mutex lock error"),
         }
     }
 }
@@ -104,5 +121,11 @@ impl From<rusqlite::Error> for SqliteError {
 
             _ => SqliteError::OpenFail(err.to_string()),
         }
+    }
+}
+
+impl<T> From<std::sync::PoisonError<T>> for SqliteError {
+    fn from(_: std::sync::PoisonError<T>) -> Self {
+        SqliteError::LockPoisoned
     }
 }

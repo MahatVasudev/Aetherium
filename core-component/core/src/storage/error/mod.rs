@@ -35,4 +35,6 @@ pub enum SqliteError {
     AssertionFail(String),
 
     CreateFail(String),
+
+    LockPoisoned,
 }
