@@ -9,7 +9,7 @@ use crate::storage::{
     },
 };
 
-pub trait SqliteLayout {
+pub trait SqliteLayout: Send + Sync {
     fn version(&self) -> SqliteStoreVersion;
 
     fn create_base(&self, sqlite_store: &SqliteStore) -> Result<(), SqliteError>;

@@ -47,7 +47,8 @@ pub fn initialize_tables_codex(codex_txn: &Transaction) -> Result<(), SqliteErro
                         hash text not null,
                         created_at datetime default current_timestamp,
                         modified_at datetime default current_timestamp,
-                        indexed_at datetime default current_timestamp
+                        indexed_at datetime,
+                        embedded_at datetime 
                 )",
         (),
     )?;
@@ -66,10 +67,33 @@ pub fn initialize_tables_codex(codex_txn: &Transaction) -> Result<(), SqliteErro
                     file_id text not null,
                     keyword_id text not null,
                     frequency integer not null default 1,
-                    foreign key (file_id) references files(id),
-                    foreign key (keyword_id) references keywords(id)
+                    foreign key (file_id) references files(id) on delete cascade,
+                    foreign key (keyword_id) references keywords(id) on delete cascade
                 )",
         (),
+    )?;
+
+    codex_txn.execute(
+        "create table if not exists chunks (
+            id TEXT primary key,
+            doc_id TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            start_char INTEGER NOT NULL,
+            end_char INTEGER NOT NULL,
+            
+            foreign key (doc_id) REFERENCES files(id) on delete cascade
+    )",
+        [],
+    )?;
+
+    codex_txn.execute(
+        "
+        CREATE VIRTUAL TABLE IF NOT EXISTS chunk_embeddings USING vec0(
+            chunk_id TEXT PRIMARY KEY,
+            embedding FLOAT[384]
+        );
+        ",
+        [],
     )?;
 
     Ok(())

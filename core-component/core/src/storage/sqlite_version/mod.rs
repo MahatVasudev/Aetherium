@@ -6,10 +6,13 @@ pub enum SqliteStoreVersion {
 }
 
 impl SqliteStoreVersion {
-    pub fn parse(version: &str) -> Self {
+    pub fn latest() -> Self {
+        SqliteStoreVersion::V1
+    }
+    pub fn parse(version: &str) -> Option<Self> {
         match version {
-            "v1" => SqliteStoreVersion::V1,
-            _ => SqliteStoreVersion::V1,
+            "v1" => Some(SqliteStoreVersion::V1),
+            _ => None,
         }
     }
 

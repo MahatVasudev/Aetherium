@@ -22,7 +22,7 @@ impl SqliteLayout for SQLITESTOREV1 {
         id: String,
         hash: String,
     ) -> Result<(), SqliteError> {
-        let mut codex_conn = sqlite_store.codex_conn.borrow_mut();
+        let mut codex_conn = sqlite_store.codex_conn.lock()?;
 
         let codex_txn = codex_conn.transaction()?;
 
@@ -34,12 +34,20 @@ impl SqliteLayout for SQLITESTOREV1 {
     }
 
     fn delete(&self, sqlite_store: &SqliteStore, fileid: String) -> Result<(), SqliteError> {
-        let mut codex_conn = sqlite_store.codex_conn.borrow_mut();
-        let codex_txn = codex_conn.transaction()?;
+        let codex_conn = sqlite_store.codex_conn.lock()?;
 
-        codex_txn.execute("delete from files where id = ?1;", (fileid,))?;
-
-        codex_txn.commit()?;
+        codex_conn.execute(
+            "UPDATE keywords SET doc_count = doc_count - 1 WHERE id IN (
+            SELECT keyword_id FROM files_keywords WHERE file_id = ?1
+        )",
+            rusqlite::params![fileid],
+        )?;
+        codex_conn.execute("DELETE FROM keywords WHERE doc_count <= 0", [])?;
+        codex_conn.execute(
+            "DELETE FROM files_keywords WHERE file_id = ?1",
+            rusqlite::params![fileid],
+        )?;
+        codex_conn.execute("DELETE FROM files WHERE id = ?1", rusqlite::params![fileid])?;
         Ok(())
     }
 
@@ -48,7 +56,7 @@ impl SqliteLayout for SQLITESTOREV1 {
         sqlite_store: &SqliteStore,
     ) -> Result<Vec<types::FileInSQL>, SqliteError> {
         // FIXME: Add a batch retrieval, so that it is scalable
-        let codex_conn = sqlite_store.codex_conn.borrow_mut();
+        let codex_conn = sqlite_store.codex_conn.lock()?;
         let mut query = codex_conn.prepare(
             "
             select 
@@ -57,7 +65,9 @@ impl SqliteLayout for SQLITESTOREV1 {
                 hash,
                 extensions, 
                 created_at, 
-                modified_at 
+                modified_at,
+                indexed_at,
+                embedded_at
             from files;",
         )?;
 
@@ -70,6 +80,8 @@ impl SqliteLayout for SQLITESTOREV1 {
                     extension: row.get(3)?,
                     created_at: Some(row.get(4)?),
                     modified_at: Some(row.get(5)?),
+                    indexed_at: Some(row.get(6)?),
+                    embedded_at: Some(row.get(7)?),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -82,18 +94,20 @@ impl SqliteLayout for SQLITESTOREV1 {
         sqlite_store: &SqliteStore,
         file: &types::FileInSQL,
     ) -> Result<(), SqliteError> {
-        let mut codex_conn = sqlite_store.codex_conn.borrow_mut();
+        let mut codex_conn = sqlite_store.codex_conn.lock()?;
         let codex_txn = codex_conn.transaction()?;
 
         codex_txn.execute(
             "
-        insert into files (id, name, extensions, hash)
-        values (?1,?2,?3,?4);",
+        insert into files (id, name, extensions, hash, indexed_at, embedded_at)
+        values (?1,?2,?3,?4,?5,?6);",
             (
                 file.id.clone(),
                 file.name.clone(),
                 file.extension.clone(),
                 file.hash.clone(),
+                file.indexed_at.clone(),
+                file.embedded_at.clone(),
             ),
         )?;
 
@@ -116,8 +130,8 @@ impl SqliteLayout for SQLITESTOREV1 {
         // (even for codex or cache should not be saved, if either one of them fails)
         // These should be in individual blocks for codex db and cache db
 
-        let mut codex_conn = sqlite_store.codex_conn.borrow_mut();
-        let mut cache_conn = sqlite_store.cache_conn.borrow_mut();
+        let mut codex_conn = sqlite_store.codex_conn.lock()?;
+        let mut cache_conn = sqlite_store.cache_conn.lock()?;
         let codex_updates = vec![
             TriggerTables {
                 table_name: "files".into(),
@@ -161,7 +175,7 @@ impl SqliteLayout for SQLITESTOREV1 {
         file: &types::FileInSQL,
         term_frequencies: &std::collections::HashMap<String, usize>,
     ) -> Result<(), SqliteError> {
-        let mut conn = sqlite_store.codex_conn.borrow_mut();
+        let mut conn = sqlite_store.codex_conn.lock()?;
         let txn = conn.transaction()?;
 
         txn.execute(

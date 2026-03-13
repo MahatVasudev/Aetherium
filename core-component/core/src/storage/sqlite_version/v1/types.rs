@@ -5,6 +5,8 @@ pub struct FileInSQL {
     pub extension: String,
     pub created_at: Option<String>,
     pub modified_at: Option<String>,
+    pub indexed_at: Option<String>,
+    pub embedded_at: Option<String>,
 }
 
 pub struct Info {
