@@ -7,9 +7,12 @@
 
 pub mod chunkreader;
 pub mod doc_counter;
+pub mod sentence_splitter;
 pub mod term_counter;
+pub mod text_extractor;
 pub mod tokenizer;
 pub mod utils;
+pub mod sentence_chunker;
 
 use std::{
     collections::HashMap,
