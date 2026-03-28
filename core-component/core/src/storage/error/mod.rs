@@ -13,7 +13,7 @@ pub enum StorageError {
 
     InvalidFileId(String),
 
-    Io(io::ErrorKind),
+    Io(String),
 
     AssertionFail(String),
 

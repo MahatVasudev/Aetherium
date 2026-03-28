@@ -31,7 +31,7 @@ impl StorageLayout for StorageV1 {
         match fs::create_dir(&root_folder) {
             Err(error) => {
                 if !(error.kind() == ErrorKind::AlreadyExists) {
-                    return Err(StorageError::Io(error.kind()));
+                    return Err(StorageError::Io(error.to_string()));
                 }
             }
             _ => (),
@@ -43,7 +43,7 @@ impl StorageLayout for StorageV1 {
     fn make_dirs(&self, root_folder: &PathBuf) -> Result<(), StorageError> {
         for folder in self.all_folders() {
             if let Err(err) = fs::create_dir_all(root_folder.join(folder)) {
-                return Err(StorageError::Io(err.kind()));
+                return Err(StorageError::Io(err.to_string()));
             };
         }
         Ok(())
@@ -111,6 +111,7 @@ impl StorageLayout for StorageV1 {
         fs::set_permissions(&codex_file, perms)?;
         Ok(())
     }
+
     fn read_codex_file(&self, storage: &Storage) -> Result<CodexConfig, StorageError> {
         let result = utils::read_codex_config(&storage.root_folder)?;
         Ok(result)
@@ -191,7 +192,11 @@ impl StorageLayout for StorageV1 {
         Ok(files)
     }
 
-    fn sync(&self, storage: &Storage, on_progress: &dyn Fn(SyncEvent)) -> Result<(), StorageError> {
+    fn sync(
+        &self,
+        storage: &Storage,
+        on_progress: &mut dyn FnMut(SyncEvent),
+    ) -> Result<(), StorageError> {
         // FIX: Check if data has been updated between file-system and sqlite
         // Treat filesystem as the ground truth, and sqlite as the overview of filesystem
         //
@@ -211,7 +216,11 @@ impl StorageLayout for StorageV1 {
         // We also have to check before adding the file to the sql that there are no same hash, if
         // they are same, we delete the file
         let fis = storage.list_files()?;
-        let fisql = storage.sqlite()?.get_all_files()?;
+
+        let sqlite_conn = storage.sqlite()?;
+        println!("this was the problem of files");
+        let fisql = sqlite_conn.get_all_files()?;
+        println!("this was not the problem of files");
         let mut added: usize = 0;
         let mut removed: usize = 0;
         let mut updated: usize = 0;
@@ -219,7 +228,7 @@ impl StorageLayout for StorageV1 {
             fis.into_iter().map(|f| (f.id.clone(), f)).collect();
         let fisql_map: HashMap<String, FileInSQL> =
             fisql.into_iter().map(|f| (f.id.clone(), f)).collect();
-        let sqlite_conn = storage.sqlite()?;
+
         for (id, fs_file) in &fis_map {
             if !fisql_map.contains_key(id) {
                 let file = FileInSQL {
@@ -232,7 +241,7 @@ impl StorageLayout for StorageV1 {
                     embedded_at: None,
                     indexed_at: None,
                 };
-                storage.sqlite()?.add_metadata(&file)?;
+                sqlite_conn.add_metadata(&file)?;
                 if fs_file.extention.starts_with("text/") {
                     let tf = TFIDFCorpus::compute_tf(storage.data_folder().join(&id), 150)?;
                     sqlite_conn.reindex_file(&file, &tf)?;
@@ -262,11 +271,11 @@ impl StorageLayout for StorageV1 {
                 let current_hash = fs_file.get_hash(storage)?.to_hex().to_string();
 
                 if current_hash != sqlfile.hash {
-                    storage.sqlite()?.update_hash(id.into(), current_hash)?;
+                    sqlite_conn.update_hash(id.into(), current_hash)?;
 
                     if fs_file.extention.starts_with("text/") {
                         let tf = TFIDFCorpus::compute_tf(storage.data_folder().join(&id), 150)?;
-                        storage.sqlite()?.reindex_file(&sqlfile, &tf)?;
+                        sqlite_conn.reindex_file(&sqlfile, &tf)?;
                     }
 
                     on_progress(SyncEvent::FileUpdated { id: id.clone() });
@@ -283,5 +292,31 @@ impl StorageLayout for StorageV1 {
         });
 
         Ok(())
+    }
+
+    fn read_file_delimiter(
+        &self,
+        storage: &Storage,
+        file_id: String,
+        start_char: usize,
+        end_char: usize,
+    ) -> Result<String, StorageError> {
+        let content = std::fs::read_to_string(storage.data_folder().join(file_id))?;
+        let chars: Vec<char> = content.chars().collect();
+
+        // expand start backwards to word boundary
+        let mut real_start = start_char;
+        while real_start > 0 && !chars[real_start].is_whitespace() {
+            real_start -= 1;
+        }
+
+        // expand end forwards to word boundary
+        let mut real_end = end_char.min(chars.len());
+        while real_end < chars.len() && !chars[real_end].is_whitespace() {
+            real_end += 1;
+        }
+
+        let text: String = chars[real_start..real_end].iter().collect();
+        Ok(text.trim().to_string())
     }
 }

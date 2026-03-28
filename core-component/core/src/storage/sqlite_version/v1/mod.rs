@@ -1,13 +1,21 @@
 pub mod types;
 pub mod utils;
+use std::result;
 
-use uuid::Uuid;
-
-use crate::storage::{
-    error::SqliteError,
-    sqlite::SqliteStore,
-    sqlite_version::{layout::SqliteLayout, v1::types::TriggerTables},
+use crate::{
+    ml_server::config::MLConfig,
+    storage::{
+        error::SqliteError,
+        sqlite::SqliteStore,
+        sqlite_version::{
+            layout::SqliteLayout,
+            v1::types::{SemanticSearchResult, TriggerTables},
+        },
+    },
+    tfidf::embeddings::{Chunk, ChunkEmbedding},
 };
+use uuid::Uuid;
+use zerocopy::IntoBytes;
 
 pub struct SQLITESTOREV1;
 
@@ -57,6 +65,7 @@ impl SqliteLayout for SQLITESTOREV1 {
     ) -> Result<Vec<types::FileInSQL>, SqliteError> {
         // FIXME: Add a batch retrieval, so that it is scalable
         let codex_conn = sqlite_store.codex_conn.lock()?;
+        println!("got error after starting sqlite");
         let mut query = codex_conn.prepare(
             "
             select 
@@ -71,6 +80,7 @@ impl SqliteLayout for SQLITESTOREV1 {
             from files;",
         )?;
 
+        println!("got error after starting sqlite query creation");
         let files = query
             .query_map((), |row| {
                 Ok(types::FileInSQL {
@@ -80,13 +90,85 @@ impl SqliteLayout for SQLITESTOREV1 {
                     extension: row.get(3)?,
                     created_at: Some(row.get(4)?),
                     modified_at: Some(row.get(5)?),
-                    indexed_at: Some(row.get(6)?),
-                    embedded_at: Some(row.get(7)?),
+                    indexed_at: None,
+                    embedded_at: None,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(files)
+    }
+
+    fn delete_chunk(&self, sqlite_store: &SqliteStore, docid: String) -> Result<(), SqliteError> {
+        let mut codex_conn = sqlite_store.codex_conn.lock()?;
+        let codex_txn = codex_conn.transaction()?;
+
+        codex_txn.execute(
+            "delete from chunk_embeddings where chunk_id in (
+                select id in chunks where doc_id = ?1
+        )",
+            [&docid],
+        )?;
+
+        codex_txn.execute(
+            "
+        delete from chunks where doc_id = ?1;
+            ",
+            [docid],
+        )?;
+
+        codex_txn.commit()?;
+
+        Ok(())
+    }
+
+    fn find_similar_files_embedding(
+        &self,
+        sqlite_store: &SqliteStore,
+        query_vector: Vec<f32>,
+        top_k: usize,
+    ) -> Result<Vec<SemanticSearchResult>, SqliteError> {
+        use zerocopy::IntoBytes;
+        let conn = sqlite_store.codex_conn.lock()?;
+
+        let mut query = conn.prepare(
+            "
+SELECT
+    ce.chunk_id,
+    ce.distance,
+    c.doc_id,
+    c.start_char,
+    c.end_char,
+    f.name
+FROM (
+    SELECT chunk_id, distance
+    FROM chunk_embeddings
+    WHERE embedding MATCH ?
+    ORDER BY distance
+    LIMIT ?
+) ce
+JOIN chunks c ON ce.chunk_id = c.id
+JOIN files f ON c.doc_id = f.id
+            ",
+        )?;
+
+        let result = query
+            .query_map(
+                rusqlite::params![query_vector.as_bytes(), top_k as i64],
+                |f| {
+                    Ok(SemanticSearchResult {
+                        chunk_id: f.get(0)?,
+                        distance: f.get(1)?,
+                        doc_id: f.get(2)?,
+                        start_char: f.get::<_, i64>(3)? as usize,
+                        end_char: f.get::<_, i64>(4)? as usize,
+                        file_name: f.get(5)?,
+                    })
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(result)
     }
 
     fn add_metadata(
@@ -131,7 +213,13 @@ impl SqliteLayout for SQLITESTOREV1 {
         // These should be in individual blocks for codex db and cache db
 
         let mut codex_conn = sqlite_store.codex_conn.lock()?;
+
         let mut cache_conn = sqlite_store.cache_conn.lock()?;
+
+        let config = match MLConfig::load() {
+            Ok(c) => c,
+            Err(e) => return Err(SqliteError::Corrupt(e.message())),
+        };
         let codex_updates = vec![
             TriggerTables {
                 table_name: "files".into(),
@@ -152,7 +240,7 @@ impl SqliteLayout for SQLITESTOREV1 {
 
         // NOTE: Create tables for codex db
         utils::initialize_tables_codex(&codex_txn)?;
-
+        utils::initialize_tables_embeddings(&codex_txn, &config.dims)?;
         // NOTE: Create tables for cache db
         utils::initialize_tables_cache(&cache_txn)?;
 
@@ -169,6 +257,56 @@ impl SqliteLayout for SQLITESTOREV1 {
         }
     }
 
+    fn write_chunktext(
+        &self,
+        sqlite_store: &SqliteStore,
+        chunk: &[Chunk],
+    ) -> Result<(), SqliteError> {
+        let mut conn = sqlite_store.codex_conn.lock()?;
+
+        let txn = conn.transaction()?;
+
+        for c in chunk {
+            txn.execute(
+                "insert into chunks (id, doc_id, chunk_index, start_char, end_char)
+            values (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    c.chunk_id,
+                    c.doc_id,
+                    c.chunk_index as i64,
+                    c.start_char as i64,
+                    c.end_char as i64,
+                ],
+            )?;
+        }
+
+        txn.commit()?;
+        Ok(())
+    }
+
+    fn write_embeddings(
+        &self,
+        sqlite_store: &SqliteStore,
+        chunk_embedding: &[ChunkEmbedding],
+    ) -> Result<(), SqliteError> {
+        let mut conn = sqlite_store.codex_conn.lock()?;
+
+        let txn = conn.transaction()?;
+
+        for emb in chunk_embedding {
+            txn.execute(
+                "
+        insert into chunk_embeddings (chunk_id, embedding)
+        values (?1, ?2)
+            ",
+                rusqlite::params![emb.chunk_id, emb.embedding.as_bytes()],
+            )?;
+        }
+
+        txn.commit()?;
+
+        Ok(())
+    }
     fn reindex_file(
         &self,
         sqlite_store: &SqliteStore,

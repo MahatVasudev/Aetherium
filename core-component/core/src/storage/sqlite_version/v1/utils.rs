@@ -73,6 +73,13 @@ pub fn initialize_tables_codex(codex_txn: &Transaction) -> Result<(), SqliteErro
         (),
     )?;
 
+    Ok(())
+}
+
+pub fn initialize_tables_embeddings(
+    codex_txn: &Transaction,
+    dims: &u32,
+) -> Result<(), SqliteError> {
     codex_txn.execute(
         "create table if not exists chunks (
             id TEXT primary key,
@@ -87,12 +94,14 @@ pub fn initialize_tables_codex(codex_txn: &Transaction) -> Result<(), SqliteErro
     )?;
 
     codex_txn.execute(
-        "
+        &format!(
+            "
         CREATE VIRTUAL TABLE IF NOT EXISTS chunk_embeddings USING vec0(
-            chunk_id TEXT PRIMARY KEY,
-            embedding FLOAT[384]
+            chunk_id TEXT,
+            embedding FLOAT[{dims}] distance_metric=cosine,
         );
-        ",
+        "
+        ),
         [],
     )?;
 

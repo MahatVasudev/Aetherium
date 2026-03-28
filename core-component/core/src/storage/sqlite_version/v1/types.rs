@@ -15,6 +15,15 @@ pub struct Info {
     sqlite_version: String,
 }
 
+pub struct SemanticSearchResult {
+    pub chunk_id: String,
+    pub doc_id: String,
+    pub distance: f32,
+    pub start_char: usize,
+    pub end_char: usize,
+    pub file_name: String,
+}
+
 pub struct TriggerTables {
     pub table_name: String,
     pub col: String,

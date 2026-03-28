@@ -9,6 +9,7 @@ pub struct MLConfig {
     pub port: u16,
     pub model: String,
     pub version: u32,
+    pub dims: u32,
 }
 
 impl Default for MLConfig {
@@ -17,7 +18,8 @@ impl Default for MLConfig {
             host: "localhost".to_string(),
             port: 50032,
             version: 1,
-            model: "all-MiniLM-L6-v2".to_string(),
+            model: "BAAI/bge-small-en-v1.5".to_string(),
+            dims: 384,
         }
     }
 }

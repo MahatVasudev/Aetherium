@@ -199,7 +199,7 @@ mod testing {
                 .collect::<Vec<String>>()
         );
 
-        codex.storage.sync(&|_| {}).unwrap();
+        codex.storage.sync(&mut |_| {}).unwrap();
 
         fs::write(
             main_path.join(DATA_FOLDER).join(&name),
@@ -207,7 +207,7 @@ mod testing {
         )
         .unwrap();
 
-        codex.storage.sync(&|_| {}).unwrap();
+        codex.storage.sync(&mut |_| {}).unwrap();
         let sqlite_opp = codex.storage.sqlite().unwrap();
 
         let codex_conn = sqlite_opp.codex_conn.lock().unwrap();

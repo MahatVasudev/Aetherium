@@ -135,7 +135,17 @@ impl Storage {
         self.layout.all_folders()
     }
 
-    pub fn sync(&self, on_progress: &dyn Fn(SyncEvent)) -> Result<(), StorageError> {
+    pub fn sync(&self, on_progress: &mut dyn FnMut(SyncEvent)) -> Result<(), StorageError> {
         self.layout.sync(self, on_progress)
+    }
+
+    pub fn read_file_delimited(
+        &self,
+        file_id: String,
+        start_at: usize,
+        end_char: usize,
+    ) -> Result<String, StorageError> {
+        self.layout
+            .read_file_delimiter(self, file_id, start_at, end_char)
     }
 }

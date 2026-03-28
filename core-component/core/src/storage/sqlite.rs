@@ -7,16 +7,24 @@ use crate::{
             layout::SqliteLayout,
             v1::{
                 SQLITESTOREV1,
-                types::{self, FileInSQL},
+                types::{self, FileInSQL, SemanticSearchResult},
             },
         },
         utils,
     },
     storage_assert,
+    tfidf::embeddings::{self, Chunk, ChunkEmbedding},
 };
-use rusqlite::Connection;
-use std::{cell::RefCell, collections::HashMap, sync::Mutex};
+use rusqlite::{Connection, fallible_iterator, ffi::sqlite3_auto_extension};
+use sqlite_vec::sqlite3_vec_init;
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    path::Path,
+    sync::{Mutex, Once},
+};
 
+static VEC_INIT: Once = Once::new();
 pub struct SqliteStore {
     pub cache_conn: Mutex<Connection>,
     pub codex_conn: Mutex<Connection>,
@@ -41,6 +49,9 @@ impl SqliteStore {
         version: SqliteStoreVersion,
     ) -> Result<SqliteStore, SqliteError> {
         let database_folder = &storage.database_folder;
+        unsafe {
+            sqlite3_auto_extension(Some(std::mem::transmute(sqlite3_vec_init as *const ())));
+        }
         let codex_db = Connection::open(database_folder.join(CODEX_DB))?;
         let cache_db = Connection::open(database_folder.join(CACHE_DB))?;
 
@@ -59,6 +70,10 @@ impl SqliteStore {
                     "invalid SqliteStore Version Received".into(),
                 ));
             };
+
+            unsafe {
+                sqlite3_auto_extension(Some(std::mem::transmute(sqlite3_vec_init as *const ())));
+            }
             let codex_db = Connection::open(database_folder.join(CODEX_DB))?;
             let cache_db = Connection::open(database_folder.join(CACHE_DB))?;
 
@@ -103,6 +118,27 @@ impl SqliteStore {
     ) -> Result<(), SqliteError> {
         self.layout.reindex_file(self, file, term_frequencies)
     }
+
+    pub fn write_chunks(&self, chunks: &[Chunk]) -> Result<(), SqliteError> {
+        self.layout.write_chunktext(self, chunks)
+    }
+
+    pub fn find_similar_embedding(
+        &self,
+        query_vector: Vec<f32>,
+        top_k: usize,
+    ) -> Result<Vec<SemanticSearchResult>, SqliteError> {
+        self.layout
+            .find_similar_files_embedding(self, query_vector, top_k)
+    }
+
+    pub fn write_embeddings(&self, embeddings: &[ChunkEmbedding]) -> Result<(), SqliteError> {
+        self.layout.write_embeddings(self, embeddings)
+    }
+
+    pub fn delete_chunks(&self, doc_id: &str) -> Result<(), SqliteError> {
+        self.layout.delete_chunk(self, String::from(doc_id))
+    }
 }
 
 fn get_sqlite_version(version: SqliteStoreVersion) -> Box<dyn SqliteLayout> {
@@ -113,9 +149,8 @@ fn get_sqlite_version(version: SqliteStoreVersion) -> Box<dyn SqliteLayout> {
 
 #[cfg(test)]
 mod testing {
-    use std::{collections::HashSet, fs, io::Write, path::Path};
+    use std::{collections::HashSet, fs, path::Path};
 
-    use rusqlite::fallible_iterator::Unwrap;
     use tempfile::tempdir;
     use uuid::Uuid;
 
@@ -151,7 +186,7 @@ mod testing {
 
         fs::remove_file(codex.storage.data_folder().join(written1.file_id)).unwrap();
 
-        codex.storage.sync(&|_| {}).unwrap();
+        codex.storage.sync(&mut |_| {}).unwrap();
         println!(
             "consistent {:?}",
             fs::read_dir(codex.storage.data_folder())
@@ -214,7 +249,7 @@ mod testing {
                 .collect::<Vec<String>>()
         );
 
-        codex.storage.sync(&|_| {}).unwrap();
+        codex.storage.sync(&mut |_| {}).unwrap();
 
         assert_eq!(
             codex
@@ -258,7 +293,7 @@ mod testing {
                 .collect::<Vec<String>>()
         );
 
-        codex.storage.sync(&|_| {}).unwrap();
+        codex.storage.sync(&mut |_| {}).unwrap();
 
         fs::write(
             foldername.join(DATA_FOLDER).join(&name),
@@ -266,7 +301,7 @@ mod testing {
         )
         .unwrap();
 
-        codex.storage.sync(&|_| {}).unwrap();
+        codex.storage.sync(&mut |_| {}).unwrap();
         assert_eq!(
             codex
                 .storage

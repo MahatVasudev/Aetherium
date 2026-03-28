@@ -10,7 +10,7 @@ impl StorageError {
             | StorageError::Permission(v)
             | StorageError::InvalidFileId(v) => v,
             StorageError::AssertionFail(v) => v,
-            StorageError::Io(_) => "io error",
+            StorageError::Io(e) => e,
             StorageError::SqliteError(_) => self.message(),
         }
     }
@@ -93,7 +93,7 @@ impl From<std::io::Error> for StorageError {
         match err.kind() {
             NotFound => StorageError::NotFound("file not found".into()),
             PermissionDenied => StorageError::Permission("permission denied".into()),
-            _ => StorageError::Io(err.kind()),
+            _ => StorageError::Io(err.to_string()),
         }
     }
 }
@@ -106,18 +106,16 @@ impl From<SqliteError> for StorageError {
 
 impl From<rusqlite::Error> for SqliteError {
     fn from(err: rusqlite::Error) -> Self {
-        use rusqlite::Error::*;
-
         match err {
-            SqliteFailure(_, Some(msg)) => SqliteError::InvalidQuery(msg),
+            rusqlite::Error::SqliteFailure(_, Some(msg)) => SqliteError::InvalidQuery(msg),
 
-            InvalidQuery => SqliteError::InvalidQuery("invalid query".into()),
+            rusqlite::Error::InvalidQuery => SqliteError::InvalidQuery(err.to_string()),
 
-            QueryReturnedNoRows => SqliteError::NotFound("query returned no rows".into()),
+            rusqlite::Error::QueryReturnedNoRows => {
+                SqliteError::NotFound("query returned no rows".into())
+            }
 
-            DatabaseBusy => SqliteError::OpenFail("database busy".into()),
-
-            DatabaseCorrupt => SqliteError::Corrupt("database corrupt".into()),
+            rusqlite::Error::InvalidDatabaseIndex(_) => SqliteError::Corrupt(err.to_string()),
 
             _ => SqliteError::OpenFail(err.to_string()),
         }

@@ -11,6 +11,8 @@ pub const CONFIG_CREATED_AT: &str = "created_at";
 pub const CONFIG_READ_CHUNK_SIZE: &str = "read_chunk_size";
 pub const CONFIG_WRITE_CHUNK_SIZE: &str = "write_chunk_size";
 pub const DEFAULT_ML_MODEL: &str = "all-MiniLM-L6-v2";
+pub const CONFIG_ML_MODEL: &str = "ml-model";
+pub const CONFIG_ML_DIMS: &str = "dims";
 pub const DEFAULT_ML_DIMS: u32 = 384;
 
 pub fn get_codex_config_template(config: &CodexConfigWrite) -> String {
@@ -45,6 +47,8 @@ pub struct CodexConfig {
     pub identity: Identity,
     pub version: Version,
     pub settings: Settings,
+    #[serde(default)]
+    pub ml: MLSettings,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -73,8 +77,25 @@ pub struct Version {
 pub struct Settings {
     pub read_chunk_size: usize,
     pub write_chunk_size: usize,
-    pub embedding_model: String,
+    pub embedding_batch_size: usize,
+    pub embedding_max_token: usize,
+    pub embedding_overlap: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct MLSettings {
+    pub model_name: String,
     pub dims: u32,
+}
+
+impl Default for MLSettings {
+    fn default() -> Self {
+        Self {
+            model_name: DEFAULT_ML_MODEL.to_string(),
+            dims: DEFAULT_ML_DIMS,
+        }
+    }
 }
 
 impl Default for Settings {
@@ -82,8 +103,9 @@ impl Default for Settings {
         Self {
             read_chunk_size: 512,
             write_chunk_size: 512,
-            embedding_model: DEFAULT_ML_MODEL.to_string(),
-            dims: DEFAULT_ML_DIMS,
+            embedding_batch_size: 4,
+            embedding_max_token: 512,
+            embedding_overlap: 2,
         }
     }
 }

@@ -26,7 +26,13 @@ pub trait StorageLayout: Send + Sync {
     fn exists_dirs(&self, root_folder: &PathBuf) -> bool;
     fn all_folders(&self) -> &'static [&'static str];
     fn read_codex_file(&self, storage: &Storage) -> Result<CodexConfig, StorageError>;
-
+    fn read_file_delimiter(
+        &self,
+        storage: &Storage,
+        file_id: String,
+        start_char: usize,
+        end_char: usize,
+    ) -> Result<String, StorageError>;
     fn read_file(
         &self,
         storage: &Storage,
@@ -34,5 +40,9 @@ pub trait StorageLayout: Send + Sync {
     ) -> Result<Box<dyn io::Read>, StorageError>;
     fn delete_file(&self, storage: &Storage, file_id: &str) -> Result<(), StorageError>;
     fn list_files(&self, storage: &Storage) -> Result<Vec<FileInSystem>, StorageError>;
-    fn sync(&self, storage: &Storage, on_progress: &dyn Fn(SyncEvent)) -> Result<(), StorageError>;
+    fn sync(
+        &self,
+        storage: &Storage,
+        on_progress: &mut dyn FnMut(SyncEvent),
+    ) -> Result<(), StorageError>;
 }
