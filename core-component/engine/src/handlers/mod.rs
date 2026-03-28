@@ -1,15 +1,28 @@
 pub mod grpc_ops;
-use std::path::Path;
+use std::{path::Path, sync::Mutex};
 
 use aetherium_core::{
     codex::{Codex, versions::CodexVersion},
-    storage::{error::StorageError, sqlite_version::SqliteStoreVersion, versions::StorageVersion},
+    storage::{
+        error::{SqliteError, StorageError},
+        sqlite_version::SqliteStoreVersion,
+        storage_types::SyncEvent,
+        versions::StorageVersion,
+    },
+    tfidf::{
+        chunkreader::ChunkReader,
+        embeddings::{Chunk, ChunkEmbedding},
+        sentence_chunker::SentenceChunkerBatcher,
+    },
 };
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 use crate::{
     EngineResponse,
-    types::{EngineEvent, FileDetail},
+    error::EngineError,
+    types::{DocTextChunk, EngineEvent, FileDetail, SearchType, SyncProgress},
+    utils::{self, embed_file_helper},
 };
 
 pub fn handler_create_codex<P: AsRef<Path>>(
@@ -104,53 +117,78 @@ pub fn handler_open_codex<P: AsRef<Path>>(path: P) -> EngineResponse {
     }
 }
 
-pub fn handler_sync_live<P: AsRef<Path>>(
+pub async fn handler_sync_live<P: AsRef<Path>>(
     codex_path: P,
     on_progress: &(dyn Fn(EngineEvent) + Send + Sync),
 ) -> EngineResponse {
     // TODO: Add Logging on each operation done in the codex, added, updated or deleted
-    let codex = match Codex::open(codex_path.as_ref().into()) {
-        Ok(c) => c,
+
+    let (codex, config) = match utils::open_codex_and_config(codex_path) {
+        Ok(v) => v,
         Err(e) => {
-            error!("Got Error while opening codex: {}", e.message());
+            return EngineResponse::Error {
+                message: e.message().to_string(),
+            };
+        }
+    };
+
+    let sql_client = match codex.storage.sqlite() {
+        Ok(s) => s,
+        Err(e) => {
             return EngineResponse::Error {
                 message: e.message().into(),
             };
         }
     };
 
-    match codex
-        .storage
-        .sync(&|event| on_progress(EngineEvent::Sync(event.into())))
-    {
-        Ok(_) => EngineResponse::Synced,
-        Err(e) => EngineResponse::Error {
-            message: e.message().into(),
-        },
+    // FIX: file_to_embed needs to mutex when the sync becomes an async method
+    // For now this works, since sync is not an async method
+    let file_to_embed = match utils::codex_sync_helper(&codex, on_progress) {
+        Ok(v) => v,
+        Err(e) => {
+            return EngineResponse::Error {
+                message: e.message(),
+            };
+        }
+    };
+
+    for file_id in file_to_embed {
+        on_progress(EngineEvent::Sync(SyncProgress::Embedding {
+            file_id: file_id.clone(),
+        }));
+
+        match utils::embed_file_helper(file_id, &codex, &sql_client, &config).await {
+            Ok(_) => {}
+            Err(e) => {
+                return EngineResponse::Error {
+                    message: e.message().to_string(),
+                };
+            }
+        }
     }
+
+    EngineResponse::Synced
 }
 
-pub fn handler_add_file<P: AsRef<Path>>(
+pub async fn handler_add_file<P: AsRef<Path>>(
     codex_path: P,
     file_path: P,
     file_name: Option<String>,
 ) -> EngineResponse {
-    let codex = match Codex::open(codex_path.as_ref().into()) {
-        Ok(c) => c,
+    let (codex, codexconfig) = match utils::open_codex_and_config(codex_path) {
+        Ok(v) => v,
         Err(e) => {
-            error!("Got Error while opening codex: {}", e.message());
             return EngineResponse::Error {
-                message: e.message().into(),
+                message: e.message(),
             };
         }
     };
 
-    let codexconfig = match codex.read_config() {
-        Ok(conf) => conf,
+    let sqlite_client = match codex.storage.sqlite() {
+        Ok(sq) => sq,
         Err(e) => {
-            error!("Got Error while opening config file: {}", e.message(),);
             return EngineResponse::Error {
-                message: e.message().into(),
+                message: e.message().to_string(),
             };
         }
     };
@@ -174,37 +212,31 @@ pub fn handler_add_file<P: AsRef<Path>>(
         }
     };
 
+    match embed_file_helper(
+        added_file.file_id.clone(),
+        &codex,
+        sqlite_client,
+        &codexconfig,
+    )
+    .await
+    {
+        Ok(()) => {}
+        Err(e) => {
+            error!("Got Error while embedding file");
+            return EngineResponse::Error {
+                message: e.message().to_string(),
+            };
+        }
+    }
+
     EngineResponse::FileAdded {
         file_id: added_file.file_id,
         hash: added_file.file_hash.to_hex().to_string(),
     }
 }
 
-pub fn handler_codex_sync<P: AsRef<Path>>(codex_path: P) -> EngineResponse {
-    let codex = match Codex::open(codex_path.as_ref().into()) {
-        Ok(c) => c,
-        Err(e) => {
-            error!("Got Error while opening codex: {}", e.message());
-            return EngineResponse::Error {
-                message: e.message().into(),
-            };
-        }
-    };
-
-    match codex.storage.sync(&|_| {}) {
-        Ok(_) => EngineResponse::Synced,
-        Err(e) => {
-            error!(
-                "Error while syncing Codex: Details -> Id: {}, name: {}, error: {}",
-                codex.id,
-                codex.name,
-                e.message()
-            );
-            EngineResponse::Error {
-                message: e.message().into(),
-            }
-        }
-    }
+pub async fn handler_codex_sync<P: AsRef<Path>>(codex_path: P) -> EngineResponse {
+    handler_sync_live(codex_path, &|_| {}).await
 }
 
 pub fn handler_codex_list_files<P: AsRef<Path>>(codex_path: P) -> EngineResponse {
@@ -331,5 +363,95 @@ pub fn handler_set_config<P: AsRef<Path>>(codex_path: P, key: &str, value: &str)
         Err(e) => EngineResponse::Error {
             message: e.message().into(),
         },
+    }
+}
+
+pub async fn handler_get_files<P: AsRef<Path>>(
+    codex_path: P,
+    query: String,
+    query_type: String,
+    top_k: usize,
+) -> EngineResponse {
+    let codex = match utils::open_codex(codex_path) {
+        Ok(c) => c,
+        Err(e) => {
+            return EngineResponse::Error {
+                message: e.message().to_string(),
+            };
+        }
+    };
+
+    let sqlite_client = match codex.storage.sqlite() {
+        Ok(c) => c,
+        Err(e) => {
+            return EngineResponse::Error {
+                message: e.message().to_string(),
+            };
+        }
+    };
+    let qt = match SearchType::parse_str(&query_type) {
+        Ok(b) => b,
+        Err(e) => {
+            return EngineResponse::Error {
+                message: e.message(),
+            };
+        }
+    };
+
+    match qt {
+        SearchType::Semantic | SearchType::Mix => {
+            let query_embed = grpc_ops::handler_ml_get_query_embed(query.clone()).await;
+
+            match query_embed {
+                Ok(embed) => {
+                    let mut results =
+                        match sqlite_client.find_similar_embedding(embed.vector, top_k) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                return EngineResponse::Error {
+                                    message: e.message().to_string(),
+                                };
+                            }
+                        };
+
+                    results.reverse();
+                    for res in results {
+                        println!(
+                            "chunk id: {} doc id: {} file name: {} distance: {} start at: {} end at: {}",
+                            res.chunk_id,
+                            res.doc_id,
+                            res.file_name,
+                            res.distance,
+                            res.start_char,
+                            res.end_char
+                        );
+
+                        let text_rsp = match codex.storage.read_file_delimited(
+                            res.doc_id,
+                            res.start_char,
+                            res.end_char,
+                        ) {
+                            Ok(t) => t,
+                            Err(e) => {
+                                return EngineResponse::Error {
+                                    message: e.message().to_string(),
+                                };
+                            }
+                        };
+                        println!(
+                            "text matched:\n {}\n------------------------------\n",
+                            text_rsp
+                        );
+                    }
+
+                    EngineResponse::SearchResults
+                }
+                Err(e) => EngineResponse::Error {
+                    message: e.message(),
+                },
+            }
+        }
+
+        SearchType::Lexical => todo!(),
     }
 }

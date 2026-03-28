@@ -8,7 +8,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 aetherium-core = { path = "../core"}
 tokio = { version = "1", features = ["full"]}
-tonic = "0.14.5"
+tonic = "0.12"
+prost = "0.13"
+uuid = { version = "1.6", features = ["v4", "fast-rng"] }
 
 [build-dependencies]
-tonic-prost-build = "0.14.5"
+tonic-build = "0.12"

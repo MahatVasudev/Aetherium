@@ -19,7 +19,9 @@ impl Engine {
         use EngineLiveRequest::*;
 
         match request {
-            Sync { codex_path } => return handlers::handler_sync_live(codex_path, on_progress),
+            Sync { codex_path } => {
+                return handlers::handler_sync_live(codex_path, on_progress).await;
+            }
 
             _ => EngineResponse::Error {
                 message: "not implemented".into(),
@@ -47,7 +49,7 @@ impl Engine {
                 codex_path,
                 file_path,
                 file_name,
-            } => return handlers::handler_add_file(codex_path, file_path, file_name),
+            } => return handlers::handler_add_file(codex_path, file_path, file_name).await,
 
             GetConfig { codex_path, key } => return handlers::handler_get_config(codex_path, key),
 
@@ -57,7 +59,7 @@ impl Engine {
                 val,
             } => return handlers::handler_set_config(codex_path, &key, &val),
 
-            Sync { codex_path } => return handlers::handler_codex_sync(codex_path),
+            Sync { codex_path } => return handlers::handler_codex_sync(codex_path).await,
 
             ListFiles { codex_path } => return handlers::handler_codex_list_files(codex_path),
 
@@ -67,6 +69,13 @@ impl Engine {
             } => return handlers::handler_codex_delete_file(codex_path, file_id),
 
             MLHealth => return grpc_ops::handler_ml_health().await,
+
+            SearchFiles {
+                codex_path,
+                query,
+                query_type,
+                top_k,
+            } => return handlers::handler_get_files(codex_path, query, query_type, top_k).await,
 
             _ => EngineResponse::Error {
                 message: "not yet implemented".into(),

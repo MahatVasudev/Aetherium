@@ -3,6 +3,7 @@ pub mod handler;
 mod handlers;
 pub mod ml_client;
 pub mod types;
+pub mod utils;
 
 use aetherium_core::codex::Codex;
 use std::path::PathBuf;
@@ -38,6 +39,13 @@ pub enum EngineRequest {
 
     ListFiles {
         codex_path: PathBuf,
+    },
+
+    SearchFiles {
+        codex_path: String,
+        query: String,
+        query_type: String,
+        top_k: usize,
     },
 
     GetConfig {
@@ -90,7 +98,7 @@ pub enum EngineResponse {
     },
     MLHealth {
         status: String,
-        version: u32,
+        version: String,
         model: String,
         dims: u32,
     },

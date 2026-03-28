@@ -8,6 +8,9 @@ pub enum EngineError {
     Corrupt(String),
     ConnectionError(tonic::transport::Error),
     GRPCError(tonic::Status),
+    SearchModeNotFound(String),
+    CodexCouldNotOpen(String),
+    SyncFail(String),
 }
 
 impl EngineError {
@@ -17,6 +20,11 @@ impl EngineError {
             Self::Corrupt(v) => format!("Something has been corrupted: {v}"),
             Self::ConnectionError(v) => format!("GRPC connection error: {}", v.to_string()),
             Self::GRPCError(v) => format!("GRPC status error: {}", v.to_string()),
+            Self::SearchModeNotFound(v) => {
+                format!("Search Mode Type Given Could not be found: {}", v)
+            }
+            Self::CodexCouldNotOpen(v) => format!("Codex could not be open: {}", v),
+            Self::SyncFail(v) => format!("Codex Sync Failed: {}", v),
         }
     }
 }
