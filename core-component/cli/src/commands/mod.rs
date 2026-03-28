@@ -2,10 +2,11 @@ mod ask;
 mod codex;
 pub mod config;
 mod create;
+pub mod ml_server;
 mod search;
 
-use crate::commands::config::ConfigCmd;
-pub use crate::commands::{ask::AskCmd, codex::CodexCmd, create::CreateCmd, search::SearchCmd};
+pub use crate::commands::{codex::CodexCmd, create::CreateCmd, search::SearchCmd};
+use crate::commands::{config::ConfigCmd, ml_server::MLCmd};
 use anyhow;
 use clap::{Args, Subcommand};
 
@@ -16,6 +17,9 @@ pub enum Commands {
     #[command(subcommand)]
     Codex(CodexCmd),
     Config(ConfigCmd),
+
+    #[command(subcommand, name = "ml-server")]
+    MLServer(MLCmd),
 }
 
 #[async_trait::async_trait]

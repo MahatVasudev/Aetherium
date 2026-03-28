@@ -8,7 +8,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use clap::Subcommand;
 
-use crate::commands::{AddFile, DeleteFile, Runnable, SyncCodex};
+use crate::commands::{AddFile, DeleteFile, Runnable, SearchCmd, SyncCodex};
 
 #[derive(Subcommand)]
 pub enum CodexCmd {
@@ -16,6 +16,9 @@ pub enum CodexCmd {
     Delete(DeleteFile),
     Sync(SyncCodex),
     ListFiles,
+
+    #[command(name = "ask")]
+    Search(SearchCmd),
 }
 
 #[async_trait::async_trait]
@@ -28,8 +31,34 @@ impl Runnable for CodexCmd {
             Add(addfile) => addfile_function(addfile, &engine, &path).await,
             Sync(s) => sync_function(&s, &engine, &path).await,
             ListFiles => listfile_function(&engine, &path).await,
+            Search(s) => s.run().await,
+            Delete(s) => deletefile_function(&engine, &path, s.file.clone()).await,
             _ => return Err(anyhow!("Not Implemented yet")),
         }
+    }
+}
+
+async fn deletefile_function(
+    engine: &Engine,
+    path: &PathBuf,
+    file_id: String,
+) -> anyhow::Result<()> {
+    let response = engine
+        .handle(EngineRequest::DeleteFile {
+            codex_path: path.to_path_buf(),
+            file_id: file_id.clone(),
+        })
+        .await;
+
+    match response {
+        EngineResponse::FileDeleted => {
+            println!("file deleted {}", file_id);
+            Ok(())
+        }
+
+        EngineResponse::Error { message } => Err(anyhow!(message)),
+
+        _ => Err(anyhow!("unexpected response")),
     }
 }
 

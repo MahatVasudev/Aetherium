@@ -9,10 +9,3 @@ pub struct CLI {
     #[command(subcommand)]
     pub command: Commands,
 }
-
-#[derive(Debug, ValueEnum, Clone)]
-pub enum SearchMode {
-    Lexical,
-    Semantic,
-    Hybrid,
-}

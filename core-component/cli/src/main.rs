@@ -20,6 +20,7 @@ async fn main() {
         Commands::Create(cmd) => cmd.run().await,
         Commands::Codex(cmd) => cmd.run().await,
         Commands::Config(cmd) => cmd.run().await,
+        Commands::MLServer(cmd) => cmd.run().await,
     };
 
     if let Err(e) = result {
