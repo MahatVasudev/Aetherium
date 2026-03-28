@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package aetherium_ml;
+
+service AetheriumMLService {
+  rpc EmbedBatch(EmbedBatchRequest) returns (EmbedBatchResponse);
+  rpc EmbedQuery(EmbedQueryRequest) returns (EmbedQueryResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+message EmbedBatchRequest { repeated TextChunk chunks = 1; }
+
+message TextChunk {
+  string chunk_id = 1;
+  string doc_id = 2;
+  int32 chunk_index = 3;
+  string text = 4;
+}
+
+message EmbedBatchResponse { repeated ChunkEmbedding embeddings = 1; }
+
+message ChunkEmbedding {
+  string chunk_id = 1;
+  string doc_id = 2;
+  repeated float vector = 3;
+}
+
+message EmbedQueryRequest { string query = 1; }
+
+message EmbedQueryResponse { repeated float vector = 1; }
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  string version = 2;
+  string model = 3;
+  uint32 dims = 4;
+}

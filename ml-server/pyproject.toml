@@ -1,0 +1,9 @@
+[project]
+name = "aetherium_ml_server"
+description = "A small example library"
+dependencies = [
+"grpcio",
+"grpcio-tools",
+"numpy",
+"fastembed"
+]
