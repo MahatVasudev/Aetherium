@@ -23,6 +23,24 @@ impl Engine {
                 return handlers::handler_sync_live(codex_path, on_progress).await;
             }
 
+            AddFile {
+                codex_path,
+                file_path,
+                file_name,
+            } => {
+                return handlers::handler_add_file_live(
+                    codex_path,
+                    file_path,
+                    file_name,
+                    on_progress,
+                )
+                .await;
+            }
+
+            Cluster { codex_path } => {
+                return handlers::handler_cluster(codex_path, on_progress).await;
+            }
+
             _ => EngineResponse::Error {
                 message: "not implemented".into(),
             },
@@ -76,6 +94,15 @@ impl Engine {
                 query_type,
                 top_k,
             } => return handlers::handler_get_files(codex_path, query, query_type, top_k).await,
+
+            Cluster { codex_path } => return handlers::handler_cluster(codex_path, &|_| {}).await,
+
+            MLConfigSetup => return handlers::handler_ml_config_setup(),
+
+            ClusterStats { codex_path } => return handlers::handler_get_cluster_info(codex_path),
+            ListFileWithClusters { codex_path } => {
+                return handlers::handler_list_files_with_clusters(codex_path);
+            }
 
             _ => EngineResponse::Error {
                 message: "not yet implemented".into(),

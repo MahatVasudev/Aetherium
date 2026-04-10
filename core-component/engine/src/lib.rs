@@ -8,7 +8,9 @@ pub mod utils;
 use aetherium_core::codex::Codex;
 use std::path::PathBuf;
 
-use crate::types::FileDetail;
+use crate::types::{
+    BasicClusterInfo, ClusterModelInfo, FileDetail, FileDetailWithCluster, SearchMatchedDetails,
+};
 
 pub struct Engine {
     codex: Option<Codex>,
@@ -63,7 +65,19 @@ pub enum EngineRequest {
         codex_path: PathBuf,
     },
 
+    Cluster {
+        codex_path: PathBuf,
+    },
+
+    MLConfigSetup,
     MLHealth,
+    ListFileWithClusters {
+        codex_path: PathBuf,
+    },
+
+    ClusterStats {
+        codex_path: PathBuf,
+    },
 }
 
 pub enum EngineResponse {
@@ -84,7 +98,10 @@ pub enum EngineResponse {
         files: Vec<FileDetail>,
     },
     Synced,
-    SearchResults,
+    PartialSynced,
+    SearchResults {
+        results: Vec<(SearchMatchedDetails, String)>,
+    },
     Clusters,
     GotConfig {
         value: Option<String>,
@@ -102,9 +119,44 @@ pub enum EngineResponse {
         model: String,
         dims: u32,
     },
+    Clustered {
+        clusters_found: u32,
+        unique_clusters: Vec<(String, i32)>,
+    },
+
+    ClusterStats {
+        model_info: ClusterModelInfo,
+        stats: Vec<BasicClusterInfo>,
+    },
+
     MLUnavailable(String),
+    MLConfigSetupSuccessful {
+        path: String,
+    },
+    FileListWithClusters {
+        files: Vec<FileDetailWithCluster>,
+    },
 }
 
 pub enum EngineLiveRequest {
-    Sync { codex_path: PathBuf },
+    Sync {
+        codex_path: PathBuf,
+    },
+
+    Cluster {
+        codex_path: PathBuf,
+    },
+
+    AddFile {
+        codex_path: PathBuf,
+        file_path: PathBuf,
+        file_name: Option<String>,
+    },
+}
+
+#[macro_export]
+macro_rules! engine_err {
+    ($e:expr) => {
+        return EngineResponse::Error { message: $e.into() }
+    };
 }

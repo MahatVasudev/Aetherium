@@ -6,9 +6,9 @@ use crate::{
     error::EngineError,
     ml_client::{
         self,
-        aetherium_ml::{EmbedBatchResponse, EmbedQueryResponse},
+        aetherium_ml::{ClusterResponse, EmbedBatchResponse, EmbedQueryResponse},
     },
-    types::DocTextChunk,
+    types::{ClusterChunkInput, DocTextChunk},
 };
 
 pub async fn handler_ml_health() -> EngineResponse {
@@ -76,4 +76,12 @@ pub async fn handler_ml_get_batch_embed(
     };
 
     Ok(batch_embed)
+}
+
+pub async fn handler_ml_cluster(
+    chunks: Vec<ClusterChunkInput>,
+    config: &MLConfig,
+) -> Result<ClusterResponse, EngineError> {
+    let mut client = ml_client::MLClient::connect(config).await?;
+    client.cluster(chunks, config).await
 }

@@ -25,13 +25,25 @@ name = "aetherium-engine"
 version = "0.1.0"
 dependencies = [
  "aetherium-core",
+ "aetherium-macros",
  "prost",
+ "serde",
  "tokio",
+ "toml",
  "tonic",
  "tonic-build",
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "aetherium-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

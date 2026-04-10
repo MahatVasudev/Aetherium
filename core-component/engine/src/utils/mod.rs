@@ -62,6 +62,10 @@ pub fn codex_sync_helper(
             SyncEvent::FileAdded { id, .. } => {
                 file_to_embed.push(id.clone());
             }
+
+            SyncEvent::FileEmbeddingPending { id } => {
+                file_to_embed.push(id.clone());
+            }
             SyncEvent::FileRemoved { id } => {
                 if let Err(e) = codex
                     .storage
