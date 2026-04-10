@@ -17,8 +17,7 @@ impl SentenceSplitter {
         let mut start_char = para.start_char;
         let mut last_word = String::new();
 
-        println!("{}", para.start_char);
-        for text in para.text.chars() {
+        for (idx, text) in para.text.char_indices() {
             if text == '\"' {
                 is_quote = !is_quote;
             }
@@ -38,7 +37,7 @@ impl SentenceSplitter {
                         });
 
                         curr_sentence = "".into();
-                        start_char = end_char + 1;
+                        start_char = end_char + idx;
                     } else {
                         curr_sentence.push(text);
                         last_word.clear();
@@ -54,7 +53,7 @@ impl SentenceSplitter {
                     });
 
                     curr_sentence = "".into();
-                    start_char = end_char + 1;
+                    start_char = end_char;
                 }
             } else if text.is_whitespace() {
                 last_word.clear();

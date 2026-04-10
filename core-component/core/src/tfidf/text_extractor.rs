@@ -40,7 +40,7 @@ impl<R: Iterator<Item = Result<String, StorageError>>> Iterator for TextExtracto
             if !complete_p.is_empty() {
                 self.carry = carry_p.to_string();
                 let start = self.position;
-                self.position += complete_p.chars().count() + 1;
+                self.position += complete_p.chars().count() + 2;
                 return Some(Ok(TextChunk {
                     text: complete_p.to_string(),
                     start_char: start,

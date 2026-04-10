@@ -104,10 +104,11 @@ impl<P: Iterator<Item = Result<String, StorageError>>> Iterator for SentenceChun
 
                     if !chunked_vec.is_empty() {
                         let c_idx = self.chunk_index;
+                        let start = chunked_vec.len().saturating_sub(self.overlap);
                         self.chunk_index += 1;
 
                         self.chunk_buff = chunked_vec
-                            .get((chunked_vec.len() - self.overlap)..)
+                            .get(start..)
                             .unwrap_or_else(|| &chunked_vec[chunked_vec.len() - 1..])
                             .to_vec();
 

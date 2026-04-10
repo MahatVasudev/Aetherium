@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::Path};
 
 use crate::{
     storage::error::StorageError,
-    tfidf::{chunkreader::ChunkReader, tokenizer::Tokenizer},
+    tfidf::{bigram::BigramIterator, chunkreader::ChunkReader, tokenizer::Tokenizer},
 };
 
 pub struct TermCounter;
@@ -12,12 +12,33 @@ impl TermCounter {
         tokens: R,
     ) -> Result<HashMap<String, usize>, StorageError> {
         let mut counts = HashMap::new();
+
         for result in tokens {
             let token = result?;
             *counts.entry(token).or_insert(0) += 1
         }
 
         Ok(counts)
+    }
+
+    pub fn count_with_bigrams<R: Iterator<Item = Result<String, StorageError>>>(
+        tokens: R,
+    ) -> Result<HashMap<String, usize>, StorageError> {
+        let bigram_iter = BigramIterator::new(tokens);
+        Self::count(bigram_iter)
+    }
+
+    pub fn count_from_file_with_bigram<P: AsRef<Path>>(
+        path: P,
+        buff: usize,
+    ) -> Result<HashMap<String, usize>, StorageError> {
+        let chunks = ChunkReader::open(path, buff)?;
+        let tokens = Tokenizer::new(chunks);
+        Self::count_with_bigrams(tokens)
+    }
+
+    pub fn count_from_str(tokens: Vec<String>) -> HashMap<String, usize> {
+        Self::count(tokens.into_iter().map(|s| Ok(s))).unwrap()
     }
     pub fn count_from_file<P: AsRef<Path>>(
         path: P,

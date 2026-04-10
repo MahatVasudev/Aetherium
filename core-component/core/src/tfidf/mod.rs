@@ -5,11 +5,15 @@
 // Lets work with some sample documents in a folder
 //
 
+pub mod bigram;
 pub mod chunkreader;
+pub mod codeblock_filter;
 pub mod doc_counter;
 pub mod embeddings;
+pub mod pdf_reader;
 pub mod sentence_chunker;
 pub mod sentence_splitter;
+pub mod stopwords;
 pub mod term_counter;
 pub mod text_extractor;
 pub mod tokenizer;
@@ -21,13 +25,13 @@ use std::{
     sync::LazyLock,
 };
 
+use crate::tfidf::{
+    chunkreader::ChunkReader, codeblock_filter::CodeBlockFilter, doc_counter::DocumentCounter,
+    stopwords::stopwords, term_counter::TermCounter, tokenizer::Tokenizer,
+};
 use crate::{
     CURRENT_DIR,
     storage::{Storage, error::StorageError, sqlite_version::v1::types::FileInSQL},
-    tfidf::{
-        chunkreader::ChunkReader, doc_counter::DocumentCounter, term_counter::TermCounter,
-        tokenizer::Tokenizer,
-    },
 };
 
 pub static EXAMPLE_STATIC_DIR: LazyLock<Option<path::PathBuf>> = LazyLock::new(|| {
@@ -56,9 +60,21 @@ impl TFIDFCorpus {
         chunk_size: usize,
     ) -> Result<HashMap<String, usize>, StorageError> {
         let chunks = ChunkReader::open(&file_path, chunk_size)?;
-        let tokens = Tokenizer::new(chunks);
+        let cb_filter = CodeBlockFilter::new(chunks);
+        let tokens = Tokenizer::new(cb_filter);
+        TermCounter::count_with_bigrams(tokens)
+    }
 
-        TermCounter::count(tokens)
+    pub fn compute_tf_from_str(string: &str) -> HashMap<String, usize> {
+        let tokens = Tokenizer::<std::iter::Empty<_>>::tokenize_raw(string);
+        let token_iter = tokens.into_iter().map(|s| Ok(s));
+        TermCounter::count_with_bigrams(token_iter).unwrap()
+    }
+
+    pub fn vocabulary(&self) -> Vec<String> {
+        let mut vocab: Vec<String> = self.doc_freq.keys().cloned().collect();
+        vocab.sort();
+        vocab
     }
 
     pub fn add_document(
@@ -69,12 +85,7 @@ impl TFIDFCorpus {
     ) -> Result<(), StorageError> {
         let path = storage.data_folder().join(&file.id);
 
-        let tf = {
-            let chunks = ChunkReader::open(&path, chunk_size)?;
-            let tokens = Tokenizer::new(chunks);
-
-            TermCounter::count(tokens)?
-        };
+        let tf = Self::compute_tf(&path, chunk_size)?;
 
         {
             let chunks = ChunkReader::open(&path, chunk_size)?;
@@ -135,6 +146,36 @@ impl TFIDFCorpus {
 
         scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scores.truncate(n);
+        scores
+    }
+
+    pub fn top_terms_for_docs(&self, doc_ids: &[&str], n: usize) -> Vec<(String, f64)> {
+        let mut agg_tf: HashMap<String, usize> = HashMap::new();
+
+        for doc_id in doc_ids {
+            if let Some(tf_map) = self.term_freq.get(*doc_id) {
+                for (term, freq) in tf_map {
+                    if stopwords().contains(&term.to_string()) {
+                        continue;
+                    }
+                    *agg_tf.entry(term.clone()).or_insert(0) += freq;
+                }
+            }
+        }
+
+        let mut scores: Vec<(String, f64)> = agg_tf
+            .keys()
+            .map(|term| {
+                let df = self.doc_freq.get(term).copied().unwrap_or(0);
+                let idf = ((self.total_docs as f64 + 1.0) / (df as f64 + 1.0)).ln() + 1.0;
+                let tf = agg_tf[term];
+                (term.clone(), tf as f64 * idf)
+            })
+            .collect();
+
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scores.truncate(n);
+
         scores
     }
 }
