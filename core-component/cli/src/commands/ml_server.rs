@@ -19,6 +19,9 @@ pub struct MLConfig {
 
     #[arg(long, short, value_names = ["KEY", "VALUE"], num_args = 2)]
     pub set: Option<Vec<String>>,
+
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    pub setup: bool,
 }
 
 #[async_trait::async_trait]
@@ -28,7 +31,13 @@ impl Runnable for MLCmd {
         let engine = Engine::new(None);
         match self {
             MLCmd::CheckHealth => ml_checkhealth(&engine).await,
-            MLCmd::Config(value) => todo!(),
+            MLCmd::Config(value) => {
+                if value.setup == true {
+                    ml_config_setup(&engine).await
+                } else {
+                    Err(anyhow!("not implemented"))
+                }
+            }
         }
     }
 }
@@ -51,6 +60,18 @@ async fn ml_checkhealth(engine: &Engine) -> anyhow::Result<()> {
 
         EngineResponse::Error { message } => return Err(anyhow!(message)),
 
+        _ => return Err(anyhow!("unexpected response")),
+    }
+}
+
+async fn ml_config_setup(engine: &Engine) -> anyhow::Result<()> {
+    match engine.handle(EngineRequest::MLConfigSetup).await {
+        EngineResponse::MLConfigSetupSuccessful { path } => {
+            println!("Successfully Setup ML Config in {}", path);
+            Ok(())
+        }
+
+        EngineResponse::Error { message } => return Err(anyhow!(message)),
         _ => return Err(anyhow!("unexpected response")),
     }
 }

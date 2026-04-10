@@ -1,6 +1,10 @@
 use std::env;
 
 use crate::commands::Runnable;
+use crate::views::config::MetaDataCellConfig;
+use crate::views::content_viewer::ContentTable;
+use crate::views::content_viewer::MetaDataCell;
+use crate::views::content_viewer::Render;
 
 use aetherium_engine::Engine;
 use aetherium_engine::EngineRequest;
@@ -8,6 +12,9 @@ use aetherium_engine::EngineResponse;
 use anyhow::anyhow;
 use clap::Args;
 use clap::ValueEnum;
+use terminal_size::Height;
+use terminal_size::Width;
+use terminal_size::terminal_size;
 
 #[derive(Args)]
 pub struct SearchCmd {
@@ -58,8 +65,35 @@ impl Runnable for SearchCmd {
             })
             .await
         {
-            EngineResponse::SearchResults => {
-                println!("Successfull");
+            EngineResponse::SearchResults { results } => {
+                let contents = results
+                    .iter()
+                    .map(|f| {
+                        (
+                            MetaDataCell::new(
+                                &f.0.file_name,
+                                &f.0.file_id,
+                                vec![
+                                    f.0.cluster
+                                        .to_owned()
+                                        .unwrap_or("Not Clustered Yet".to_string()),
+                                ],
+                                Some(format!(
+                                    "Chunk id {} Distance id {}",
+                                    f.0.chunk_id, f.0.distance
+                                )),
+                                Some(MetaDataCellConfig {
+                                    max_letters: f.0.file_id.len(),
+                                    ..Default::default()
+                                }),
+                            ),
+                            vec![f.1.to_owned()],
+                        )
+                    })
+                    .collect::<Vec<(MetaDataCell, _)>>();
+                let content_table = ContentTable::build(contents, None, (None, None));
+
+                println!("{}", content_table.render());
                 Ok(())
             }
 

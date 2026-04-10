@@ -1,4 +1,5 @@
 mod ask;
+pub mod cluster;
 mod codex;
 pub mod config;
 mod create;
@@ -41,6 +42,12 @@ pub struct AddFile {
 pub struct SyncCodex {
     #[arg(long, action = clap::ArgAction::SetTrue)]
     pub silent: bool,
+}
+
+#[derive(Args)]
+pub struct ListFile {
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    pub no_cluster: bool,
 }
 
 #[derive(Args)]

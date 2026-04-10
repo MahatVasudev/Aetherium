@@ -5,18 +5,23 @@ use aetherium_engine::{
     types::{EngineEvent, SyncProgress},
 };
 use anyhow::anyhow;
-use async_trait::async_trait;
 use clap::Subcommand;
 
-use crate::commands::{AddFile, DeleteFile, Runnable, SearchCmd, SyncCodex};
+use crate::{
+    commands::{
+        AddFile, DeleteFile, ListFile, Runnable, SearchCmd, SyncCodex, cluster::ClusterCmd,
+    },
+    views::tabular_view::{Column, TabularView},
+};
 
 #[derive(Subcommand)]
 pub enum CodexCmd {
     Add(AddFile),
     Delete(DeleteFile),
     Sync(SyncCodex),
-    ListFiles,
-
+    ListFiles(ListFile),
+    #[command(subcommand, name = "cluster")]
+    Cluster(ClusterCmd),
     #[command(name = "ask")]
     Search(SearchCmd),
 }
@@ -30,9 +35,15 @@ impl Runnable for CodexCmd {
         match self {
             Add(addfile) => addfile_function(addfile, &engine, &path).await,
             Sync(s) => sync_function(&s, &engine, &path).await,
-            ListFiles => listfile_function(&engine, &path).await,
+            ListFiles(s) => {
+                if s.no_cluster {
+                    return listfile_function(&engine, &path).await;
+                }
+                return listfile_with_cluster(&engine, &path).await;
+            }
             Search(s) => s.run().await,
             Delete(s) => deletefile_function(&engine, &path, s.file.clone()).await,
+            Cluster(c) => c.run().await,
             _ => return Err(anyhow!("Not Implemented yet")),
         }
     }
@@ -68,20 +79,65 @@ async fn listfile_function(engine: &Engine, path: &PathBuf) -> anyhow::Result<()
             codex_path: path.to_path_buf(),
         })
         .await;
+    let mut table = TabularView::new(vec![
+        Column::new("id"),
+        Column::new("name"),
+        Column::new("extention"),
+        Column::new("modified at"),
+    ]);
 
     match response {
         EngineResponse::FileList { files } => {
-            println!("id\tname\textension\tmodified at");
             for file in files {
-                let modified_at = match file.modified_at {
-                    Some(date) => date,
-                    None => "--".to_string(),
-                };
-                println!(
-                    "{}\t{}\t{}\t{:?}",
-                    file.id, file.name, file.extension, modified_at
-                );
+                table.add_row(vec![
+                    Some(file.id),
+                    Some(file.name),
+                    Some(file.extension),
+                    file.modified_at,
+                ])?;
             }
+
+            table.print();
+
+            Ok(())
+        }
+
+        EngineResponse::Error { message } => return Err(anyhow!(message)),
+
+        _ => return Err(anyhow!("unexpected response")),
+    }
+}
+
+async fn listfile_with_cluster(engine: &Engine, path: &PathBuf) -> anyhow::Result<()> {
+    let response = engine
+        .handle(EngineRequest::ListFileWithClusters {
+            codex_path: path.to_path_buf(),
+        })
+        .await;
+
+    let mut table = TabularView::new(vec![
+        Column::new("id"),
+        Column::new("name"),
+        Column::new("extention"),
+        Column::new("created at"),
+        Column::new("Cluster Name"),
+        Column::new("Match"),
+    ]);
+
+    match response {
+        EngineResponse::FileListWithClusters { files } => {
+            for file in files {
+                table.add_row(vec![
+                    Some(file.id),
+                    Some(file.name),
+                    Some(file.extension),
+                    file.created_at,
+                    file.cluster_name,
+                    file.top_cluster_pct.map(|p| format!("{:.0}%", p)),
+                ])?;
+            }
+
+            table.print();
 
             Ok(())
         }
@@ -98,11 +154,35 @@ async fn addfile_function(
     path: &PathBuf,
 ) -> anyhow::Result<()> {
     let response = engine
-        .handle(EngineRequest::AddFile {
-            codex_path: path.clone(),
-            file_path: PathBuf::from(addfile.file.clone()),
-            file_name: addfile.name.clone(),
-        })
+        .handle_live(
+            EngineLiveRequest::AddFile {
+                codex_path: path.clone(),
+                file_path: PathBuf::from(addfile.file.clone()),
+                file_name: addfile.name.clone(),
+            },
+            &|event| match event {
+                EngineEvent::OperationStarted => {
+                    println!(
+                        " -> Adding File {} ({})",
+                        addfile.file,
+                        addfile
+                            .name
+                            .clone()
+                            .unwrap_or("#Not Specified#".to_string())
+                    )
+                }
+                EngineEvent::MLUnavailable => {
+                    println!(
+                        "ML Server is unavailable currently... run 'aetherium ml-server start'"
+                    );
+                    println!("Embeddings wont be performed");
+                }
+
+                _ => {
+                    eprintln!("Unexpected event Recorded")
+                }
+            },
+        )
         .await;
 
     match response {
@@ -144,6 +224,24 @@ async fn sync_function(
                 EngineEvent::Sync(SyncProgress::FileUpdated { id }) => {
                     println!(" * File Updated = {id}")
                 }
+                EngineEvent::Sync(SyncProgress::DimsMISMATCH { previous, proposed }) => {
+                    println!("@# DIMS mismatch found; current: {}, given: {}; reseting table", previous, proposed)
+                }
+                EngineEvent::Sync(SyncProgress::DimsChanged { previous, now }) => {
+                    println!("@# Embedding Table Has Been Reset")
+                }
+                EngineEvent::MLUnavailable => {
+
+                    println!(
+                        "ML Server is unavailable currently... run 'aetherium ml-server start'"
+                    );
+
+                    println!("Embedding wont be performed... run 'aetherium codex sync after starting ml-server'")
+                }
+
+                EngineEvent::Sync(SyncProgress::Embedding { file_id }) => {
+                    println!(" [...] embedding file = {file_id}")
+                }
                 EngineEvent::Sync(SyncProgress::Done {
                     added,
                     removed,
@@ -161,6 +259,11 @@ async fn sync_function(
     match response {
         EngineResponse::Synced => {
             println!("Files Synced");
+            Ok(())
+        }
+
+        EngineResponse::PartialSynced => {
+            println!("Partially Synced, Embeddings Left");
             Ok(())
         }
 
