@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod views;
 
 use clap::{Parser, ValueEnum};
 pub use commands::Commands;
