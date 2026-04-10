@@ -1,6 +1,5 @@
-use std::fmt::Display;
-
 use crate::EngineResponse;
+use std::fmt::Display;
 
 #[derive(Debug)]
 pub enum EngineError {
@@ -11,6 +10,7 @@ pub enum EngineError {
     SearchModeNotFound(String),
     CodexCouldNotOpen(String),
     SyncFail(String),
+    InvalidUri(tonic::codegen::http::uri::InvalidUri),
 }
 
 impl EngineError {
@@ -25,6 +25,7 @@ impl EngineError {
             }
             Self::CodexCouldNotOpen(v) => format!("Codex could not be open: {}", v),
             Self::SyncFail(v) => format!("Codex Sync Failed: {}", v),
+            Self::InvalidUri(v) => format!("Invalid Uri Recieved: {}", v),
         }
     }
 }
