@@ -11,6 +11,15 @@ pub struct FileInSystem {
     pub modified_at: String,
 }
 
+pub struct BasicClusterInfo {
+    pub id: i64,
+    pub name: String,
+    pub chunk_count: usize,
+    pub file_count: usize,
+    pub top_files: Vec<String>,
+    pub created_at: String,
+}
+
 impl FileInSystem {
     pub fn from(storage: &Storage, file_id: String) -> Result<Self, StorageError> {
         let file_name = storage.data_folder().join(&file_id);
@@ -72,9 +81,20 @@ pub enum SyncEvent {
     FileUpdated {
         id: String,
     },
+    FileEmbeddingPending {
+        id: String,
+    },
     Done {
         added: usize,
         removed: usize,
         updated: usize,
+    },
+    DimsMISMATCH {
+        previous: u32,
+        proposed: u32,
+    },
+    DIMSChanged {
+        previous: u32,
+        now: u32,
     },
 }

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use crate::{
+    codex::codex_config::CodexConfig,
     storage::{
         error::StorageError,
         sqlite::SqliteStore,
@@ -137,6 +138,13 @@ impl Storage {
 
     pub fn sync(&self, on_progress: &mut dyn FnMut(SyncEvent)) -> Result<(), StorageError> {
         self.layout.sync(self, on_progress)
+    }
+
+    pub fn read_config(&self) -> Result<CodexConfig, StorageError> {
+        // VULN: UNSAFE, use CODEX.read_config
+        let codexconfig = utils::read_codex_config(self.root_folder())?;
+
+        Ok(codexconfig)
     }
 
     pub fn read_file_delimited(

@@ -3,6 +3,7 @@ use uuid::Uuid;
 
 use crate::{
     codex::{self, codex_config::CodexConfig},
+    ml_server::config::MLConfig,
     storage::{
         CODEX_FILE, DATA_FOLDER, DATABASE_FOLDER, INDEXED_FOLDER, Storage,
         error::StorageError,
@@ -12,12 +13,18 @@ use crate::{
         versions::{StorageVersion, layout::StorageLayout},
     },
     storage_assert,
-    tfidf::TFIDFCorpus,
+    tfidf::{
+        TFIDFCorpus,
+        chunkreader::ChunkReader,
+        sentence_splitter::{Sentence, SentenceSplitter},
+        text_extractor::{TextChunk, TextExtractor},
+    },
 };
 use std::{
     collections::HashMap,
     fs::{self, File},
     io::{self, ErrorKind},
+    ops::Deref,
     path::{Path, PathBuf},
 };
 
@@ -197,16 +204,11 @@ impl StorageLayout for StorageV1 {
         storage: &Storage,
         on_progress: &mut dyn FnMut(SyncEvent),
     ) -> Result<(), StorageError> {
-        // FIX: Check if data has been updated between file-system and sqlite
-        // Treat filesystem as the ground truth, and sqlite as the overview of filesystem
-        //
         // NOTE: Working
         // - Check all files present in sqlite, and check all files present in file system,
         // - If files id is present in file system and not in sqlite, add data in sqlite
         // - if files id is present in sqlite and not in file system then remove data id in sqlite
-
         // Make hash set of ids from both file system and sqlite
-
         // Make hash of each data to see whether they have been changed or not, if they have update
         // the hash in the sqlite and update modified at
 
@@ -216,11 +218,9 @@ impl StorageLayout for StorageV1 {
         // We also have to check before adding the file to the sql that there are no same hash, if
         // they are same, we delete the file
         let fis = storage.list_files()?;
-
+        let ml_config = MLConfig::load().unwrap_or_default();
         let sqlite_conn = storage.sqlite()?;
-        println!("this was the problem of files");
         let fisql = sqlite_conn.get_all_files()?;
-        println!("this was not the problem of files");
         let mut added: usize = 0;
         let mut removed: usize = 0;
         let mut updated: usize = 0;
@@ -229,21 +229,82 @@ impl StorageLayout for StorageV1 {
         let fisql_map: HashMap<String, FileInSQL> =
             fisql.into_iter().map(|f| (f.id.clone(), f)).collect();
 
+        let current_dims_embedding = sqlite_conn.check_embedding_dims()?;
+
+        if current_dims_embedding != ml_config.dims {
+            on_progress(SyncEvent::DimsMISMATCH {
+                previous: current_dims_embedding,
+                proposed: ml_config.dims,
+            });
+
+            sqlite_conn.reset_embedding_dims(ml_config.dims);
+            on_progress(SyncEvent::DIMSChanged {
+                previous: current_dims_embedding,
+                now: ml_config.dims,
+            });
+        }
+
+        for (id, _) in &fisql_map {
+            if !fis_map.contains_key(id) {
+                sqlite_conn.delete_chunks(id)?;
+                sqlite_conn.delete(id.into())?;
+
+                on_progress(SyncEvent::FileRemoved { id: id.clone() });
+
+                removed += 1;
+            }
+        }
+
+        for file in sqlite_conn.list_not_embeded_files()? {
+            on_progress(SyncEvent::FileEmbeddingPending { id: file.id });
+        }
+
         for (id, fs_file) in &fis_map {
             if !fisql_map.contains_key(id) {
+                let name: String;
+                let off_id: String;
+                let fs_file_def: FileInSystem;
+
+                if uuid::Uuid::try_parse(id).is_err() {
+                    off_id = uuid::Uuid::new_v4().to_string();
+                    name = id.to_string();
+
+                    fs::rename(
+                        storage.data_folder().join(id),
+                        storage.data_folder().join(&off_id),
+                    )?;
+
+                    fs_file_def = FileInSystem {
+                        id: off_id.clone(),
+                        extention: fs_file.extention.clone(),
+                        modified_at: fs_file.modified_at.clone(),
+                    };
+
+                    println!("{:?}", fs_file_def.id);
+                    println!("{:?}", fs_file_def.get_hash(storage))
+                } else {
+                    off_id = id.to_string();
+                    name = String::from("Untitled");
+                    fs_file_def = FileInSystem {
+                        id: fs_file.id.clone(),
+                        extention: fs_file.extention.clone(),
+                        modified_at: fs_file.modified_at.clone(),
+                    };
+                }
+
                 let file = FileInSQL {
-                    id: id.into(),
-                    name: "Untitled".into(),
-                    hash: fs_file.get_hash(&storage)?.to_hex().to_string(),
-                    extension: fs_file.extention.clone(),
-                    created_at: None,
-                    modified_at: None,
+                    id: off_id.clone(),
+                    name: name,
+                    hash: fs_file_def.get_hash(storage)?.to_hex().to_string(),
+                    extension: fs_file_def.extention.clone(),
+                    created_at: Some(fs_file_def.modified_at.clone()),
+                    modified_at: Some(fs_file_def.modified_at.clone()),
                     embedded_at: None,
                     indexed_at: None,
                 };
                 sqlite_conn.add_metadata(&file)?;
-                if fs_file.extention.starts_with("text/") {
-                    let tf = TFIDFCorpus::compute_tf(storage.data_folder().join(&id), 150)?;
+                if fs_file_def.extention.starts_with("text/") {
+                    let tf = TFIDFCorpus::compute_tf(storage.data_folder().join(&off_id), 150)?;
                     sqlite_conn.reindex_file(&file, &tf)?;
                 }
 
@@ -256,16 +317,6 @@ impl StorageLayout for StorageV1 {
             }
         }
 
-        for (id, _) in &fisql_map {
-            if !fis_map.contains_key(id) {
-                sqlite_conn.delete(id.into())?;
-
-                on_progress(SyncEvent::FileRemoved { id: id.clone() });
-
-                removed += 1;
-            }
-        }
-
         for (id, fs_file) in &fis_map {
             if let Some(sqlfile) = fisql_map.get(id) {
                 let current_hash = fs_file.get_hash(storage)?.to_hex().to_string();
@@ -273,6 +324,7 @@ impl StorageLayout for StorageV1 {
                 if current_hash != sqlfile.hash {
                     sqlite_conn.update_hash(id.into(), current_hash)?;
 
+                    sqlite_conn.delete_chunks(id)?;
                     if fs_file.extention.starts_with("text/") {
                         let tf = TFIDFCorpus::compute_tf(storage.data_folder().join(&id), 150)?;
                         sqlite_conn.reindex_file(&sqlfile, &tf)?;
@@ -304,16 +356,35 @@ impl StorageLayout for StorageV1 {
         let content = std::fs::read_to_string(storage.data_folder().join(file_id))?;
         let chars: Vec<char> = content.chars().collect();
 
-        // expand start backwards to word boundary
-        let mut real_start = start_char;
-        while real_start > 0 && !chars[real_start].is_whitespace() {
+        let total = chars.len();
+
+        // expand start back to sentence boundary
+        let mut real_start = start_char.min(total.saturating_sub(1));
+        while real_start > 0 && !matches!(chars[real_start], '.' | '!' | '?' | '\n') {
             real_start -= 1;
         }
+        if real_start > 0 {
+            real_start += 1;
+        }
 
-        // expand end forwards to word boundary
-        let mut real_end = end_char.min(chars.len());
-        while real_end < chars.len() && !chars[real_end].is_whitespace() {
+        // expand end forward to sentence boundary
+        let mut real_end = end_char.min(total);
+        while real_end < total && !matches!(chars[real_end], '.' | '!' | '?' | '\n') {
             real_end += 1;
+        }
+        if real_end < total {
+            real_end += 1;
+        }
+
+        // guard against inverted range
+        if real_start >= real_end {
+            real_start = start_char.min(total);
+            real_end = end_char.min(total);
+        }
+
+        // final safety check
+        if real_start >= real_end || real_end > total {
+            return Ok(String::new());
         }
 
         let text: String = chars[real_start..real_end].iter().collect();

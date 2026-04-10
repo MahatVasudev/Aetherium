@@ -10,9 +10,9 @@ use crate::{
     codex::{
         Codex,
         codex_config::{
-            self, CONFIG_CODEX_VERSION, CONFIG_CREATED_AT, CONFIG_ID, CONFIG_NAME,
+            self, CONFIG_CODEX_VERSION, CONFIG_CREATED_AT, CONFIG_ID, CONFIG_ML_DIMS, CONFIG_NAME,
             CONFIG_READ_CHUNK_SIZE, CONFIG_SQLITESTORE_VERSION, CONFIG_STORAGE_VERSION,
-            CONFIG_WRITE_CHUNK_SIZE, CodexConfig, ConfigValue,
+            CONFIG_WRITE_CHUNK_SIZE, CodexConfig, ConfigValue, DEFAULT_ML_DIMS,
         },
         utils,
         versions::{CodexVersion, layout_for},
@@ -36,8 +36,7 @@ impl Codex {
             return Err(StorageError::Corrupt("Codex is not validated".into()));
         }
 
-        let codexconfig = storage::utils::read_codex_config(self.storage.root_folder())?;
-
+        let codexconfig = self.storage.read_config()?;
         Ok(codexconfig)
     }
 
@@ -107,6 +106,7 @@ impl Codex {
             CONFIG_CREATED_AT => Ok(ConfigValue::Str(config.version.created_at)),
             CONFIG_READ_CHUNK_SIZE => Ok(ConfigValue::UINT(config.settings.read_chunk_size)),
             CONFIG_WRITE_CHUNK_SIZE => Ok(ConfigValue::UINT(config.settings.write_chunk_size)),
+            CONFIG_ML_DIMS => Ok(ConfigValue::UINT(config.ml.dims as usize)),
 
             _ => Err(StorageError::NotFound("key not found".into())),
         }
@@ -127,6 +127,12 @@ impl Codex {
                     StorageError::AssertionFail(format!(
                         "{CONFIG_READ_CHUNK_SIZE} must be a valid number"
                     ))
+                })?;
+            }
+
+            CONFIG_ML_DIMS => {
+                config.ml.dims = value.parse::<u32>().map_err(|_| {
+                    StorageError::AssertionFail(format!("{CONFIG_ML_DIMS} must be a valid number"))
                 })?;
             }
 

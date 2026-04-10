@@ -48,7 +48,8 @@ pub fn initialize_tables_codex(codex_txn: &Transaction) -> Result<(), SqliteErro
                         created_at datetime default current_timestamp,
                         modified_at datetime default current_timestamp,
                         indexed_at datetime,
-                        embedded_at datetime 
+                        embedded_at datetime,
+                        clustered_at datetime
                 )",
         (),
     )?;
@@ -102,6 +103,34 @@ pub fn initialize_tables_embeddings(
         );
         "
         ),
+        [],
+    )?;
+
+    Ok(())
+}
+
+pub fn initialize_cluster_tables(codex_txn: &Transaction) -> Result<(), SqliteError> {
+    codex_txn.execute(
+        "
+    create table if not exists clusters (
+    id integer primary key,
+    name text not null,
+    created_at datetime default current_timestamp
+    )
+        ",
+        [],
+    )?;
+
+    codex_txn.execute(
+        "
+    create table if not exists chunk_clusters (
+    chunk_id text not null,
+    cluster_id integer not null,
+    clustered_at datetime default current_timestamp,
+
+    foreign key (cluster_id) references clusters(id)
+    )
+        ",
         [],
     )?;
 

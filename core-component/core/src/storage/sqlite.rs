@@ -7,9 +7,13 @@ use crate::{
             layout::SqliteLayout,
             v1::{
                 SQLITESTOREV1,
-                types::{self, FileInSQL, SemanticSearchResult},
+                types::{
+                    self, ChunkEmbeddingSql, ChunksSql, ClusteredDocs, FileDetailWithTopCluster,
+                    FileInSQL, SemanticSearchResult,
+                },
             },
         },
+        storage_types::BasicClusterInfo,
         utils,
     },
     storage_assert,
@@ -139,6 +143,61 @@ impl SqliteStore {
     pub fn delete_chunks(&self, doc_id: &str) -> Result<(), SqliteError> {
         self.layout.delete_chunk(self, String::from(doc_id))
     }
+
+    pub fn list_embeded_files(&self) -> Result<Vec<FileInSQL>, SqliteError> {
+        self.layout.list_embeded_files(self)
+    }
+
+    pub fn list_not_embeded_files(&self) -> Result<Vec<FileInSQL>, SqliteError> {
+        self.layout.list_not_embeded_files(self)
+    }
+
+    pub fn clear_clusters(&self) -> Result<(), SqliteError> {
+        self.layout.clear_clusters(self)
+    }
+
+    pub fn write_cluster_info(
+        &self,
+        cluster_id: i32,
+        cluster_name: &str,
+    ) -> Result<(), SqliteError> {
+        self.layout
+            .write_cluster_info(self, cluster_id, cluster_name)
+    }
+
+    pub fn write_cluster_chunks(&self, assignments: &[(String, i32)]) -> Result<(), SqliteError> {
+        self.layout.write_cluster_chunks(self, assignments)
+    }
+
+    pub fn get_all_chunks(&self) -> Result<Vec<ChunksSql>, SqliteError> {
+        self.layout.get_all_chunks(self)
+    }
+
+    pub fn get_all_embeddings(&self) -> Result<Vec<ChunkEmbeddingSql>, SqliteError> {
+        self.layout.get_all_embeddings(self)
+    }
+
+    pub fn get_doc_cluster(&self, doc_id: &str) -> Result<Vec<ClusteredDocs>, SqliteError> {
+        self.layout.get_doc_cluster(self, doc_id)
+    }
+
+    pub fn check_embedding_dims(&self) -> Result<u32, SqliteError> {
+        self.layout.get_embeds_dim(self)
+    }
+
+    pub fn list_files_with_top_clusters(
+        &self,
+    ) -> Result<Vec<FileDetailWithTopCluster>, SqliteError> {
+        self.layout.list_files_with_top_clusters(self)
+    }
+
+    pub fn reset_embedding_dims(&self, new_dims: u32) -> Result<(), SqliteError> {
+        self.layout.reset_embedding_tables(self, new_dims)
+    }
+
+    pub fn basic_describe_clusters(&self) -> Result<Vec<BasicClusterInfo>, SqliteError> {
+        self.layout.get_basic_cluster_info(self)
+    }
 }
 
 fn get_sqlite_version(version: SqliteStoreVersion) -> Box<dyn SqliteLayout> {
@@ -237,7 +296,7 @@ mod testing {
             .add_file(&raw_filename.to_path_buf(), None, 512)
             .unwrap();
         let mut name = Uuid::new_v4().to_string();
-        name.push_str(".txt");
+
         println!("{name}");
         fs::write(foldername.join(DATA_FOLDER).join(&name), b"hello world").unwrap();
 

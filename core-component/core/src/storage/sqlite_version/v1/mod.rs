@@ -1,6 +1,9 @@
 pub mod types;
 pub mod utils;
-use std::result;
+use std::{
+    collections::{HashMap, HashSet},
+    result,
+};
 
 use crate::{
     ml_server::config::MLConfig,
@@ -9,13 +12,19 @@ use crate::{
         sqlite::SqliteStore,
         sqlite_version::{
             layout::SqliteLayout,
-            v1::types::{SemanticSearchResult, TriggerTables},
+            v1::types::{
+                ChunkEmbeddingSql, ChunksSql, ClusterFile, FileDetailWithTopCluster,
+                SemanticSearchResult, TriggerTables,
+            },
         },
+        storage_types,
     },
     tfidf::embeddings::{Chunk, ChunkEmbedding},
 };
 use uuid::Uuid;
 use zerocopy::IntoBytes;
+
+use zerocopy;
 
 pub struct SQLITESTOREV1;
 
@@ -65,22 +74,20 @@ impl SqliteLayout for SQLITESTOREV1 {
     ) -> Result<Vec<types::FileInSQL>, SqliteError> {
         // FIXME: Add a batch retrieval, so that it is scalable
         let codex_conn = sqlite_store.codex_conn.lock()?;
-        println!("got error after starting sqlite");
         let mut query = codex_conn.prepare(
             "
-            select 
-                id, 
-                name, 
+            select
+                id,
+                name,
                 hash,
-                extensions, 
-                created_at, 
+                extensions,
+                created_at,
                 modified_at,
                 indexed_at,
                 embedded_at
             from files;",
         )?;
 
-        println!("got error after starting sqlite query creation");
         let files = query
             .query_map((), |row| {
                 Ok(types::FileInSQL {
@@ -90,8 +97,8 @@ impl SqliteLayout for SQLITESTOREV1 {
                     extension: row.get(3)?,
                     created_at: Some(row.get(4)?),
                     modified_at: Some(row.get(5)?),
-                    indexed_at: None,
-                    embedded_at: None,
+                    indexed_at: row.get(6)?, // FIXME: HOT FIX, Need to Change
+                    embedded_at: row.get(7)?, // FIXME: HOT FIX, Need to Change
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -105,7 +112,7 @@ impl SqliteLayout for SQLITESTOREV1 {
 
         codex_txn.execute(
             "delete from chunk_embeddings where chunk_id in (
-                select id in chunks where doc_id = ?1
+                select id from chunks where doc_id = ?1
         )",
             [&docid],
         )?;
@@ -120,6 +127,80 @@ impl SqliteLayout for SQLITESTOREV1 {
         codex_txn.commit()?;
 
         Ok(())
+    }
+
+    fn list_embeded_files(
+        &self,
+        sqlite_store: &SqliteStore,
+    ) -> Result<Vec<types::FileInSQL>, SqliteError> {
+        let conn = sqlite_store.codex_conn.lock()?;
+        let mut query = conn.prepare(
+            "
+                select
+                id,
+                name,
+                hash,
+                extensions,
+                created_at,
+                modified_at,
+                indexed_at,
+                embedded_at
+            from files where id in (SELECT DISTINCT doc_id from chunks)
+            ",
+        )?;
+
+        let files = query
+            .query_map([], |row| {
+                Ok(types::FileInSQL {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    hash: row.get(2)?,
+                    extension: row.get(3)?,
+                    created_at: None,  // FIXME: HOT FIX, Need to Change
+                    modified_at: None, // FIXME: HOT FIX, Need to Change
+                    indexed_at: None,  // FIXME: HOT FIX, Need to Change
+                    embedded_at: None, // FIXME: HOT FIX, Need to Change
+                })
+            })?
+            .collect::<Result<Vec<types::FileInSQL>, _>>();
+        Ok(files?)
+    }
+
+    fn list_not_embeded_files(
+        &self,
+        sqlite_store: &SqliteStore,
+    ) -> Result<Vec<types::FileInSQL>, SqliteError> {
+        let conn = sqlite_store.codex_conn.lock()?;
+        let mut query = conn.prepare(
+            "
+                select
+                id,
+                name,
+                hash,
+                extensions,
+                created_at,
+                modified_at,
+                indexed_at,
+                embedded_at
+            from files where id not in (SELECT DISTINCT doc_id from chunks)
+            ",
+        )?;
+
+        let files = query
+            .query_map([], |row| {
+                Ok(types::FileInSQL {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    hash: row.get(2)?,
+                    extension: row.get(3)?,
+                    created_at: None,  // FIXME: HOT FIX, Need to Change
+                    modified_at: None, // FIXME: HOT FIX, Need to Change
+                    indexed_at: None,  // FIXME: HOT FIX, Need to Change
+                    embedded_at: None, // FIXME: HOT FIX, Need to Change
+                })
+            })?
+            .collect::<Result<Vec<types::FileInSQL>, _>>();
+        Ok(files?)
     }
 
     fn find_similar_files_embedding(
@@ -139,7 +220,8 @@ SELECT
     c.doc_id,
     c.start_char,
     c.end_char,
-    f.name
+    f.name,
+    ct.name
 FROM (
     SELECT chunk_id, distance
     FROM chunk_embeddings
@@ -149,6 +231,8 @@ FROM (
 ) ce
 JOIN chunks c ON ce.chunk_id = c.id
 JOIN files f ON c.doc_id = f.id
+LEFT JOIN chunk_clusters cct ON c.id = cct.chunk_id
+LEFT JOIN clusters ct on cct.cluster_id = ct.id
             ",
         )?;
 
@@ -163,6 +247,7 @@ JOIN files f ON c.doc_id = f.id
                         start_char: f.get::<_, i64>(3)? as usize,
                         end_char: f.get::<_, i64>(4)? as usize,
                         file_name: f.get(5)?,
+                        cluster: f.get(6)?,
                     })
                 },
             )?
@@ -241,6 +326,7 @@ JOIN files f ON c.doc_id = f.id
         // NOTE: Create tables for codex db
         utils::initialize_tables_codex(&codex_txn)?;
         utils::initialize_tables_embeddings(&codex_txn, &config.dims)?;
+        utils::initialize_cluster_tables(&codex_txn)?;
         // NOTE: Create tables for cache db
         utils::initialize_tables_cache(&cache_txn)?;
 
@@ -355,5 +441,335 @@ JOIN files f ON c.doc_id = f.id
         txn.commit()?;
 
         Ok(())
+    }
+
+    fn get_doc_cluster(
+        &self,
+        sqlite_store: &SqliteStore,
+        doc_id: &str,
+    ) -> Result<Vec<types::ClusteredDocs>, SqliteError> {
+        todo!()
+    }
+
+    fn get_tfidf_chunks(
+        &self,
+        sqlite_store: &SqliteStore,
+        chunk_id: &str,
+    ) -> Result<Vec<(String, String, Vec<f32>)>, SqliteError> {
+        todo!()
+    }
+
+    fn write_cluster_info(
+        &self,
+        sqlite_store: &SqliteStore,
+        cluster_id: i32,
+        name: &str,
+    ) -> Result<(), SqliteError> {
+        let conn = sqlite_store.codex_conn.lock()?;
+
+        conn.execute(
+            "INSERT INTO clusters (id, name) values (?1, ?2)",
+            rusqlite::params![cluster_id, name],
+        )?;
+
+        Ok(())
+    }
+
+    fn write_cluster_chunks(
+        &self,
+        sqlite_store: &SqliteStore,
+        assignments: &[(String, i32)],
+    ) -> Result<(), SqliteError> {
+        let mut conn = sqlite_store.codex_conn.lock()?;
+        let txn = conn.transaction()?;
+        let mut stmt =
+            txn.prepare("INSERT into chunk_clusters (chunk_id, cluster_id) values (?1, ?2)")?;
+
+        for (chunk_id, cluster_id) in assignments {
+            stmt.execute(rusqlite::params![chunk_id, cluster_id])?;
+        }
+
+        drop(stmt);
+
+        txn.commit()?;
+
+        Ok(())
+    }
+
+    fn get_all_chunks(
+        &self,
+        sqlite_store: &SqliteStore,
+    ) -> Result<Vec<types::ChunksSql>, SqliteError> {
+        let conn = sqlite_store.codex_conn.lock()?;
+        let mut stmt = conn.prepare("SELECT id, doc_id, start_char, end_char FROM chunks")?;
+
+        let chunks = stmt
+            .query_map([], |row| {
+                Ok(ChunksSql {
+                    id: row.get(0)?,
+                    doc_id: row.get(1)?,
+                    start_char: row.get::<_, i64>(2)? as usize,
+                    end_char: row.get::<_, i64>(3)? as usize,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(chunks)
+    }
+
+    fn get_all_embeddings(
+        &self,
+        sqlite_store: &SqliteStore,
+    ) -> Result<Vec<ChunkEmbeddingSql>, SqliteError> {
+        let conn = sqlite_store.codex_conn.lock()?;
+        let mut stmt = conn.prepare(
+            "SELECT 
+            ce.chunk_id, 
+            c.doc_id, 
+            ce.embedding 
+            FROM chunk_embeddings ce
+            join chunks c
+            on c.id = ce.chunk_id",
+        )?;
+        let embeddings = stmt
+            .query_map([], |row| {
+                let chunk_id: String = row.get(0)?;
+                let doc_id: String = row.get(1)?;
+                let bytes: Vec<u8> = row.get(2)?;
+                Ok((chunk_id, doc_id, bytes))
+            })?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|(chunk_id, doc_id, bytes)| {
+                let embedding: Vec<f32> = bytes
+                    .chunks_exact(4)
+                    .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+                    .collect();
+                ChunkEmbeddingSql {
+                    chunk_id,
+                    doc_id,
+                    embedding,
+                }
+            })
+            .collect::<Vec<ChunkEmbeddingSql>>();
+
+        Ok(embeddings)
+    }
+
+    fn clear_clusters(&self, sqlite_store: &SqliteStore) -> Result<(), SqliteError> {
+        let mut conn = sqlite_store.codex_conn.lock()?;
+        let txn = conn.transaction()?;
+
+        txn.execute("delete from chunk_clusters", [])?;
+        txn.execute("delete from clusters", [])?;
+
+        txn.commit()?;
+
+        Ok(())
+    }
+
+    fn list_files_with_top_clusters(
+        &self,
+        sqlite_store: &SqliteStore,
+    ) -> Result<Vec<types::FileDetailWithTopCluster>, SqliteError> {
+        let mut conn = sqlite_store.codex_conn.lock()?;
+        let mut stmt = conn.prepare(
+            "
+        SELECT 
+            f.id, 
+            f.name, 
+            f.extensions,
+            f.created_at,
+            c.name as cluster_name,
+            COUNT(cc.chunk_id) * 100.0 / SUM(COUNT(cc.chunk_id)) OVER (PARTITION by f.id) as pct
+        from files f 
+        left join chunks ch on ch.doc_id = f.id 
+        left join chunk_clusters cc on cc.chunk_id = ch.id 
+        left join clusters c on c.id = cc.cluster_id
+        group by f.id, c.id 
+        order by f.id, pct desc
+            ",
+        )?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(FileDetailWithTopCluster {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    extension: row.get(2)?,
+                    created_at: row.get(3)?,
+                    cluster_name: row.get(4)?,
+                    top_cluster_pct: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut seen: HashSet<String> = HashSet::new();
+
+        let files = rows
+            .into_iter()
+            .filter(|f| seen.insert(f.id.clone()))
+            .collect();
+
+        return Ok(files);
+    }
+
+    fn get_cluster_files(
+        &self,
+        sqlite_store: &SqliteStore,
+        cluster_id: i32,
+    ) -> Result<Vec<ClusterFile>, SqliteError> {
+        let mut conn = sqlite_store.codex_conn.lock()?;
+
+        let mut stmt = conn.prepare(
+            "
+        select
+            f.id,
+            f.name,
+            COUNT(cc.chunk_id) as chunk_count,
+            COUNT(cc.chunk_id) * 100.0 / total.total_chunks as pct
+        from files f
+        join chunks ch on ch.doc_id = f.id
+        join chunk_clusters cc on cc.chunk_id = ch.id
+        join (
+            select c2.doc_id, COUNT(*) as total_chunks
+            from chunks c2
+            group by c2.doc_id
+        ) total on total.doc_id = f.id
+        where cc.cluster_id = ?1
+        group by f.id
+        order by pct DESC
+
+        ",
+        )?;
+
+        let files = stmt
+            .query_map(rusqlite::params![cluster_id], |row| {
+                Ok(ClusterFile {
+                    file_id: row.get(0)?,
+                    file_name: row.get(1)?,
+                    chunk_count: row.get::<_, i64>(2)? as usize,
+                    cluster_match: row.get(3)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(files)
+    }
+
+    fn get_embeds_dim(&self, sqlite_store: &SqliteStore) -> Result<u32, SqliteError> {
+        let mut conn = sqlite_store.codex_conn.lock()?;
+
+        let schema: String = conn.query_row(
+            "select sql from sqlite_master where name = 'chunk_embeddings';",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let current_dims = schema
+            .split("FLOAT[")
+            .nth(1)
+            .and_then(|s| s.split(']').next())
+            .and_then(|d| d.parse::<u32>().ok());
+
+        match current_dims {
+            Some(curr) => Ok(curr),
+            None => Err(SqliteError::Corrupt(
+                "not able to extract dims from 'chunk_embeddings'".to_string(),
+            )),
+        }
+    }
+
+    fn reset_embedding_tables(
+        &self,
+        sqlite_store: &SqliteStore,
+        dims: u32,
+    ) -> Result<(), SqliteError> {
+        let mut conn = sqlite_store.codex_conn.lock()?;
+
+        let txn = conn.transaction()?;
+
+        txn.execute("drop table chunk_embeddings;", [])?;
+
+        txn.execute("drop table chunks;", [])?;
+
+        utils::initialize_tables_embeddings(&txn, &dims)?;
+        txn.commit()?;
+
+        Ok(())
+    }
+
+    fn get_basic_cluster_info(
+        &self,
+        sqlite_store: &SqliteStore,
+    ) -> Result<Vec<storage_types::BasicClusterInfo>, SqliteError> {
+        let mut conn = sqlite_store.codex_conn.lock()?;
+
+        let mut stmt = conn.prepare(
+            "SELECT
+        c.id,
+        c.name,
+        COUNT(DISTINCT cc.chunk_id) as chunk_count,
+        COUNT(DISTINCT ch.doc_id) as file_count,
+        c.created_at
+        from clusters c
+        left join chunk_clusters cc ON cc.cluster_id = c.id
+        left join chunks ch ON ch.id = cc.chunk_id
+        group by c.id
+        order by chunk_count DESC
+        ",
+        )?;
+
+        let mut stats = stmt
+            .query_map([], |row| {
+                Ok(storage_types::BasicClusterInfo {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    chunk_count: row.get::<_, i64>(2)? as usize,
+                    file_count: row.get::<_, i64>(3)? as usize,
+                    created_at: row.get(4)?,
+                    top_files: Vec::new(),
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // query 2 — top 3 files per cluster
+        let mut top_stmt = conn.prepare(
+            "
+        SELECT
+            cc.cluster_id,
+            f.name,
+            COUNT(cc.chunk_id) as chunk_count
+        FROM chunk_clusters cc
+        JOIN chunks ch ON cc.chunk_id = ch.id
+        JOIN files f ON ch.doc_id = f.id
+        GROUP BY cc.cluster_id, f.id
+        ORDER BY cc.cluster_id, chunk_count DESC
+    ",
+        )?;
+
+        // collect into HashMap<cluster_id, Vec<file_name>>
+        let mut top_files: HashMap<i64, Vec<String>> = HashMap::new();
+        let rows = top_stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        for (cluster_id, file_name) in rows {
+            let files = top_files.entry(cluster_id).or_default();
+            if files.len() < 3 {
+                files.push(file_name);
+            }
+        }
+
+        // merge top_files into stats
+        for stat in &mut stats {
+            if let Some(files) = top_files.get(&stat.id) {
+                stat.top_files = files.clone();
+            }
+        }
+
+        Ok(stats)
     }
 }

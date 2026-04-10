@@ -12,7 +12,7 @@ pub const CONFIG_READ_CHUNK_SIZE: &str = "read_chunk_size";
 pub const CONFIG_WRITE_CHUNK_SIZE: &str = "write_chunk_size";
 pub const DEFAULT_ML_MODEL: &str = "all-MiniLM-L6-v2";
 pub const CONFIG_ML_MODEL: &str = "ml-model";
-pub const CONFIG_ML_DIMS: &str = "dims";
+pub const CONFIG_ML_DIMS: &str = "ml.dims";
 pub const DEFAULT_ML_DIMS: u32 = 384;
 
 pub fn get_codex_config_template(config: &CodexConfigWrite) -> String {
@@ -103,9 +103,9 @@ impl Default for Settings {
         Self {
             read_chunk_size: 512,
             write_chunk_size: 512,
-            embedding_batch_size: 4,
+            embedding_batch_size: 6,
             embedding_max_token: 512,
-            embedding_overlap: 2,
+            embedding_overlap: 3,
         }
     }
 }
