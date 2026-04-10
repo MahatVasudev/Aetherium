@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12\x61\x65therium_ml.proto\x12\x0c\x61\x65therium_ml\"<\n\x11\x45mbedBatchRequest\x12\'\n\x06\x63hunks\x18\x01 \x03(\x0b\x32\x17.aetherium_ml.TextChunk\"P\n\tTextChunk\x12\x10\n\x08\x63hunk_id\x18\x01 \x01(\t\x12\x0e\n\x06\x64oc_id\x18\x02 \x01(\t\x12\x13\n\x0b\x63hunk_index\x18\x03 \x01(\x05\x12\x0c\n\x04text\x18\x04 \x01(\t\"F\n\x12\x45mbedBatchResponse\x12\x30\n\nembeddings\x18\x01 \x03(\x0b\x32\x1c.aetherium_ml.ChunkEmbedding\"B\n\x0e\x43hunkEmbedding\x12\x10\n\x08\x63hunk_id\x18\x01 \x01(\t\x12\x0e\n\x06\x64oc_id\x18\x02 \x01(\t\x12\x0e\n\x06vector\x18\x03 \x03(\x02\"\"\n\x11\x45mbedQueryRequest\x12\r\n\x05query\x18\x01 \x01(\t\"$\n\x12\x45mbedQueryResponse\x12\x0e\n\x06vector\x18\x01 \x03(\x02\"\x0f\n\rHealthRequest\"N\n\x0eHealthResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x0f\n\x07version\x18\x02 \x01(\t\x12\r\n\x05model\x18\x03 \x01(\t\x12\x0c\n\x04\x64ims\x18\x04 \x01(\r2\xfb\x01\n\x12\x41\x65theriumMLService\x12O\n\nEmbedBatch\x12\x1f.aetherium_ml.EmbedBatchRequest\x1a .aetherium_ml.EmbedBatchResponse\x12O\n\nEmbedQuery\x12\x1f.aetherium_ml.EmbedQueryRequest\x1a .aetherium_ml.EmbedQueryResponse\x12\x43\n\x06Health\x12\x1b.aetherium_ml.HealthRequest\x1a\x1c.aetherium_ml.HealthResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12\x61\x65therium_ml.proto\x12\x0c\x61\x65therium_ml\"<\n\x11\x45mbedBatchRequest\x12\'\n\x06\x63hunks\x18\x01 \x03(\x0b\x32\x17.aetherium_ml.TextChunk\"P\n\tTextChunk\x12\x10\n\x08\x63hunk_id\x18\x01 \x01(\t\x12\x0e\n\x06\x64oc_id\x18\x02 \x01(\t\x12\x13\n\x0b\x63hunk_index\x18\x03 \x01(\x05\x12\x0c\n\x04text\x18\x04 \x01(\t\"F\n\x12\x45mbedBatchResponse\x12\x30\n\nembeddings\x18\x01 \x03(\x0b\x32\x1c.aetherium_ml.ChunkEmbedding\"B\n\x0e\x43hunkEmbedding\x12\x10\n\x08\x63hunk_id\x18\x01 \x01(\t\x12\x0e\n\x06\x64oc_id\x18\x02 \x01(\t\x12\x0e\n\x06vector\x18\x03 \x03(\x02\"\"\n\x11\x45mbedQueryRequest\x12\r\n\x05query\x18\x01 \x01(\t\"$\n\x12\x45mbedQueryResponse\x12\x0e\n\x06vector\x18\x01 \x03(\x02\"\x0f\n\rHealthRequest\"N\n\x0eHealthResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x0f\n\x07version\x18\x02 \x01(\t\x12\r\n\x05model\x18\x03 \x01(\t\x12\x0c\n\x04\x64ims\x18\x04 \x01(\r\"\x9c\x03\n\x0e\x43lusterRequest\x12)\n\x06\x63hunks\x18\x01 \x03(\x0b\x32\x19.aetherium_ml.ChunkVector\x12(\n\x04umap\x18\x04 \x01(\x0b\x32\x18.aetherium_ml.UMAPConfigH\x00\x12&\n\x03lda\x18\x05 \x01(\x0b\x32\x17.aetherium_ml.LDAConfigH\x00\x12&\n\x03lsa\x18\x06 \x01(\x0b\x32\x17.aetherium_ml.LSAConfigH\x00\x12\x35\n\x0bnone_reduce\x18\x08 \x01(\x0b\x32\x1e.aetherium_ml.NoneReduceConfigH\x00\x12.\n\x07hdbscan\x18\t \x01(\x0b\x32\x1b.aetherium_ml.HDBSCANConfigH\x01\x12,\n\x06kmeans\x18\n \x01(\x0b\x32\x1a.aetherium_ml.KMeansConfigH\x01\x12,\n\x06\x64\x62scan\x18\x0b \x01(\x0b\x32\x1a.aetherium_ml.DBSCANConfigH\x01\x42\x10\n\x0ereducer_configB\x10\n\x0e\x63luster_config\"c\n\rHDBSCANConfig\x12\x18\n\x10min_cluster_size\x18\x01 \x01(\r\x12\x18\n\x0bmin_samples\x18\x02 \x01(\rH\x00\x88\x01\x01\x12\x0e\n\x06metric\x18\x03 \x01(\tB\x0e\n\x0c_min_samples\"\x0e\n\x0cKMeansConfig\"\x0e\n\x0c\x44\x42SCANConfig\"\x12\n\x10NoneReduceConfig\"]\n\nUMAPConfig\x12\x14\n\x0cn_components\x18\x01 \x01(\r\x12\x13\n\x0bn_neighbors\x18\x02 \x01(\r\x12\x14\n\x0cmin_distance\x18\x03 \x01(\x02\x12\x0e\n\x06metric\x18\x04 \x01(\t\"L\n\tLDAConfig\x12\x14\n\x0cn_components\x18\x01 \x01(\r\x12\x10\n\x08max_iter\x18\x02 \x01(\r\x12\x17\n\x0flearning_method\x18\x03 \x01(\t\"!\n\tLSAConfig\x12\x14\n\x0cn_components\x18\x01 \x01(\r\"\x99\x01\n\x0b\x43hunkVector\x12\x10\n\x08\x63hunk_id\x18\x01 \x01(\t\x12\x0e\n\x06\x64oc_id\x18\x02 \x01(\t\x12\x32\n\tembedding\x18\x03 \x01(\x0b\x32\x1d.aetherium_ml.EmbeddingVectorH\x00\x12*\n\x05tfidf\x18\x04 \x01(\x0b\x32\x19.aetherium_ml.TFIDFVectorH\x00\x42\x08\n\x06vector\"!\n\x0f\x45mbeddingVector\x12\x0e\n\x06values\x18\x01 \x03(\x02\"\x1d\n\x0bTFIDFVector\x12\x0e\n\x06values\x18\x01 \x03(\x02\"V\n\x0f\x43lusterResponse\x12/\n\x0b\x61ssignments\x18\x01 \x03(\x0b\x32\x1a.aetherium_ml.ChunkCluster\x12\x12\n\nn_clusters\x18\x02 \x01(\x05\"4\n\x0c\x43hunkCluster\x12\x10\n\x08\x63hunk_id\x18\x01 \x01(\t\x12\x12\n\ncluster_id\x18\x02 \x01(\x05\x32\xc3\x02\n\x12\x41\x65theriumMLService\x12O\n\nEmbedBatch\x12\x1f.aetherium_ml.EmbedBatchRequest\x1a .aetherium_ml.EmbedBatchResponse\x12O\n\nEmbedQuery\x12\x1f.aetherium_ml.EmbedQueryRequest\x1a .aetherium_ml.EmbedQueryResponse\x12\x43\n\x06Health\x12\x1b.aetherium_ml.HealthRequest\x1a\x1c.aetherium_ml.HealthResponse\x12\x46\n\x07\x43luster\x12\x1c.aetherium_ml.ClusterRequest\x1a\x1d.aetherium_ml.ClusterResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -47,6 +47,32 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_HEALTHREQUEST']._serialized_end=409
   _globals['_HEALTHRESPONSE']._serialized_start=411
   _globals['_HEALTHRESPONSE']._serialized_end=489
-  _globals['_AETHERIUMMLSERVICE']._serialized_start=492
-  _globals['_AETHERIUMMLSERVICE']._serialized_end=743
+  _globals['_CLUSTERREQUEST']._serialized_start=492
+  _globals['_CLUSTERREQUEST']._serialized_end=904
+  _globals['_HDBSCANCONFIG']._serialized_start=906
+  _globals['_HDBSCANCONFIG']._serialized_end=1005
+  _globals['_KMEANSCONFIG']._serialized_start=1007
+  _globals['_KMEANSCONFIG']._serialized_end=1021
+  _globals['_DBSCANCONFIG']._serialized_start=1023
+  _globals['_DBSCANCONFIG']._serialized_end=1037
+  _globals['_NONEREDUCECONFIG']._serialized_start=1039
+  _globals['_NONEREDUCECONFIG']._serialized_end=1057
+  _globals['_UMAPCONFIG']._serialized_start=1059
+  _globals['_UMAPCONFIG']._serialized_end=1152
+  _globals['_LDACONFIG']._serialized_start=1154
+  _globals['_LDACONFIG']._serialized_end=1230
+  _globals['_LSACONFIG']._serialized_start=1232
+  _globals['_LSACONFIG']._serialized_end=1265
+  _globals['_CHUNKVECTOR']._serialized_start=1268
+  _globals['_CHUNKVECTOR']._serialized_end=1421
+  _globals['_EMBEDDINGVECTOR']._serialized_start=1423
+  _globals['_EMBEDDINGVECTOR']._serialized_end=1456
+  _globals['_TFIDFVECTOR']._serialized_start=1458
+  _globals['_TFIDFVECTOR']._serialized_end=1487
+  _globals['_CLUSTERRESPONSE']._serialized_start=1489
+  _globals['_CLUSTERRESPONSE']._serialized_end=1575
+  _globals['_CHUNKCLUSTER']._serialized_start=1577
+  _globals['_CHUNKCLUSTER']._serialized_end=1629
+  _globals['_AETHERIUMMLSERVICE']._serialized_start=1632
+  _globals['_AETHERIUMMLSERVICE']._serialized_end=1955
 # @@protoc_insertion_point(module_scope)

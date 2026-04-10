@@ -49,6 +49,11 @@ class AetheriumMLServiceStub(object):
                 request_serializer=aetherium__ml__pb2.HealthRequest.SerializeToString,
                 response_deserializer=aetherium__ml__pb2.HealthResponse.FromString,
                 _registered_method=True)
+        self.Cluster = channel.unary_unary(
+                '/aetherium_ml.AetheriumMLService/Cluster',
+                request_serializer=aetherium__ml__pb2.ClusterRequest.SerializeToString,
+                response_deserializer=aetherium__ml__pb2.ClusterResponse.FromString,
+                _registered_method=True)
 
 
 class AetheriumMLServiceServicer(object):
@@ -72,6 +77,12 @@ class AetheriumMLServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Cluster(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AetheriumMLServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -89,6 +100,11 @@ def add_AetheriumMLServiceServicer_to_server(servicer, server):
                     servicer.Health,
                     request_deserializer=aetherium__ml__pb2.HealthRequest.FromString,
                     response_serializer=aetherium__ml__pb2.HealthResponse.SerializeToString,
+            ),
+            'Cluster': grpc.unary_unary_rpc_method_handler(
+                    servicer.Cluster,
+                    request_deserializer=aetherium__ml__pb2.ClusterRequest.FromString,
+                    response_serializer=aetherium__ml__pb2.ClusterResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -172,6 +188,33 @@ class AetheriumMLService(object):
             '/aetherium_ml.AetheriumMLService/Health',
             aetherium__ml__pb2.HealthRequest.SerializeToString,
             aetherium__ml__pb2.HealthResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Cluster(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/aetherium_ml.AetheriumMLService/Cluster',
+            aetherium__ml__pb2.ClusterRequest.SerializeToString,
+            aetherium__ml__pb2.ClusterResponse.FromString,
             options,
             channel_credentials,
             insecure,
